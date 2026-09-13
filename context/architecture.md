@@ -9,7 +9,7 @@
 | Framework      | Next.js (App Router) + TypeScript          | UI rendering and API routes/server actions                            |
 | UI             | Tailwind CSS v4 + shadcn/ui (Radix base, `radix-nova` style) | Component styling on top of the custom color/type tokens in `ui-context.md` |
 | Auth           | Clerk                                      | Owner account (full credentials); worker devices unlock via a local PIN layered on top of a cached Clerk session |
-| Database       | Prisma + PostgreSQL                        | Central source of truth — server-side only, never queried directly from the client |
+| Database       | Prisma 7 + PostgreSQL (`@prisma/adapter-pg` driver adapter) | Central source of truth — server-side only, never queried directly from the client |
 | Offline sync   | PowerSync                                  | Replicates Postgres to on-device SQLite; enables offline reads/writes from the PWA |
 
 | Icons          | Lucide React        | Matches the shadcn/ui convention                                       |
@@ -26,13 +26,23 @@
 - `lib/utils.ts` — the `cn()` class-merging helper, re-exported from the
   `cn` package (shadcn's drop-in replacement for `clsx` +
   `tailwind-merge`)
-- `lib/db/` — Prisma client instance and query functions, server-only
+- `lib/db/` — Prisma client instance (`client.ts`) and per-module query
+  functions (`animals.ts`, `milk.ts`, `land.ts`, `shop.ts`), server-only.
+  Every file in here starts with `import "server-only"`, so importing one
+  from a client component is a build error rather than a runtime leak.
 - `lib/sync/` — PowerSync client setup and sync rule configuration
 - `lib/auth/` — Clerk configuration and the PIN-unlock layer that
   switches between already-authenticated worker profiles on a shared
   device
 - `prisma/schema.prisma` — the single central schema (see the
   accompanying `schema.prisma` file)
+- `prisma/migrations/` — generated migration history; applied with
+  `prisma migrate dev` locally and `prisma migrate deploy` elsewhere
+- `prisma.config.ts` — Prisma 7 CLI config. Prisma 7 no longer accepts a
+  `url` in the datasource block and no longer loads `.env` by itself, so
+  this file loads `dotenv` and hands `DATABASE_URL` to migrate and
+  introspect. The runtime client gets the same URL through its driver
+  adapter instead.
 
 ## Storage Model
 
