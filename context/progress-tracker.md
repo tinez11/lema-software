@@ -57,7 +57,9 @@ Phase 1 — core data entry for a single module, end to end.
     reload cannot open a new pool per edit.
   - `lib/db/animals.ts`, `milk.ts`, `land.ts`, `shop.ts` — thin read
     helpers per module, no business logic, no API routes or server
-    actions yet (deliberately out of this unit's scope).
+    actions yet (deliberately out of this unit's scope). Financial
+    columns are reachable only through the `...WithPricing()` /
+    `...WithFinancials()` exports (invariant 2).
   - `server-only` installed; every `lib/db/*` module imports it.
   - `postinstall: prisma generate` added so a fresh clone has a client.
 
@@ -72,6 +74,8 @@ Phase 1 — core data entry for a single module, end to end.
 | `npm run lint` passes | ✅ exit 0 |
 | Extra — invariant 1 holds in the database | ✅ `MilkRecord_date_session_key` exists; a second insert for the same date/session was rejected with `P2002`. Run inside a transaction that was rolled back, so no rows were left behind |
 | Extra — helpers run against the live schema | ✅ every exported helper in all four modules executed against Postgres (empty results, no errors) |
+| Extra — invariant 2 holds at runtime | ✅ one row seeded per money-carrying model (`unitPrice` 12.50, `cost` 45.50/120.00, `totalAmount` 25.00); all 13 default helpers returned rows with **zero** financial keys, line items inside `getSaleById` included, and all 8 privileged helpers returned theirs. Seeded rows were deleted afterwards — every table back to 0 |
+| Extra — invariant 2 holds at compile time | ✅ a temporary file asserted `unitPrice` / `totalAmount` / `subtotal` / `cost` are absent from the safe return types via `@ts-expect-error`, and present on the privileged ones; `tsc` exit 0. A negative control (the same assertion pointed at `getStockItemsWithPricing`) failed with TS2578 as it should, so the check is not vacuous. File deleted afterwards |
 
 ## In Progress
 
@@ -107,13 +111,10 @@ Nothing — `01-design-system.md` and `02-database` are complete.
 4. **Sidebar tokens.** `--sidebar-*` variables are mapped to the
    palette for completeness, but no layout in `ui-context.md` uses a
    sidebar. Drop them if a sidebar never materialises.
-5. **Where the worker cost/price filter lives.** Invariant 2 says workers
-   never receive cost, price, or profit. `lib/db/` helpers currently
-   return whole rows, cost columns included; they are server-only, so
-   nothing leaks yet. Decide before Phase 1 whether the filter belongs in
-   a DTO layer above `lib/db/`, or in role-aware `select` clauses inside
-   the helpers themselves. `architecture.md` says "the query/response
-   layer" without picking one.
+5. ~~**Where the worker cost/price filter lives.**~~ Resolved — it lives
+   inside `lib/db/` as two exports per financial query. See the
+   decision below; `architecture.md` invariant 2 and
+   `code-standards.md` now carry the rule.
 6. **`Decimal` across the server/client boundary.** Cost, price, and
    `totalAmount` come back as Prisma `Decimal` objects, which are not
    serialisable into a client component. Settle on one conversion
@@ -185,6 +186,22 @@ Nothing — `01-design-system.md` and `02-database` are complete.
   reload re-evaluates modules, and a fresh `PrismaClient` per reload
   would leak connection pools. Production evaluates once, so the cache is
   skipped there. Verified rather than assumed — see the table above.
+- **Invariant 2 is enforced inside `lib/db/`, not above it.** Each query
+  that touches money is two exports: a plainly named default that lists
+  its columns with an explicit `select` and leaves the financial ones
+  out, and a `...WithPricing()` / `...WithFinancials()` twin that returns
+  them, callable only after the caller has checked `role === OWNER`. No
+  helper takes a role parameter and branches internally — an audit greps
+  for the suffix and finds every privileged path. Explicit `select`
+  (rather than `omit`) is what makes it hold over time: a financial
+  column added to `schema.prisma` later is absent from the safe path by
+  default instead of silently joining it. The split exists in
+  `shop.ts` (`unitPrice`, `totalAmount`, `subtotal`), `land.ts` (`cost`)
+  and `animals.ts` (`cost`); `milk.ts` has no financial column and so has
+  one path per query.
+- **Collection readers are named `get*`.** `getStockItems()` sets the
+  convention the rest of `lib/db/` follows, so the safe name and its
+  privileged twin differ only by suffix.
 - **`lib/db/` is read-only for now.** The spec scoped this unit to schema
   + client + query helpers, so no writes, no server actions, no API
   routes. Write helpers arrive in Phase 1 next to the server actions that

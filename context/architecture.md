@@ -79,8 +79,14 @@
    (never per animal) — enforced by a `@@unique([date, session])`
    constraint on `MilkRecord`.
 2. Workers never receive cost, price, or profit data in any API
-   response — enforced server-side (in the query/response layer), not
-   only hidden in the UI.
+   response. This is enforced inside `lib/db/` itself, not by a
+   filtering layer above it: every module exposes a default read
+   helper that never selects financial columns, and a separately
+   named `...WithPricing()` / `...WithFinancials()` variant for the
+   financial fields, callable only from code paths that have already
+   verified `role === OWNER`. A helper must never accept a role
+   parameter and branch internally — the safe and privileged paths
+   stay two distinct, greppable exports.
 3. The Shop module has no automatic data dependency on Cows & Milk or
    Land & Produce — no code path may read milk or harvest records to
    affect shop stock. Restocking the shop is always a manual, explicit

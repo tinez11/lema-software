@@ -52,6 +52,14 @@
 - Metadata and transactional records belong in Postgres via Prisma.
 - Photos belong in object storage; store only the URL in Postgres.
 - Do not store large binary content directly in the database.
+- Financial columns (`cost`, `unitPrice`, `subtotal`, `totalAmount`) are
+  reachable only through a `...WithPricing()` / `...WithFinancials()`
+  export. The plainly named helper beside it lists its columns with an
+  explicit `select` that leaves them out, so a financial column added to
+  `schema.prisma` later is excluded from the safe path by default.
+- Never add a `role` parameter to a query helper and branch on it. The
+  two paths are two exports; the caller picks one after checking the
+  role, and `WithPricing`/`WithFinancials` is what an audit greps for.
 
 ## File Organization
 
