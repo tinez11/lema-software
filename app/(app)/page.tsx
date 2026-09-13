@@ -14,6 +14,8 @@ export default async function Home() {
     <div className="flex flex-1 flex-col">
       <header className="flex items-center justify-between border-b border-border px-5 py-4">
         <span className="text-lg font-semibold">Farm &amp; Shop Manager</span>
+        {/* Sign-out lands on /signed-out (set on ClerkProvider), which clears
+            the PIN unlock cookie before handing over to the sign-in page. */}
         <UserButton />
       </header>
 

@@ -5,7 +5,9 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // behaviour.
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
-  "/sign-up(.*)",
+  // Reached with the session already gone, to clear the PIN unlock cookie.
+  // Protecting it would redirect to sign-in before the cookie was dropped.
+  "/signed-out",
   // Clerk calls this itself, before a session exists.
   "/__clerk/(.*)",
   // Called by Clerk's servers, not by a signed-in browser. It authenticates

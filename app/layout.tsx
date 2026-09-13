@@ -19,7 +19,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${manrope.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
-        <ClerkProvider>
+        <ClerkProvider afterSignOutUrl="/signed-out">
           {children}
           {/* Pinned to light: the generated Toaster defaults to next-themes'
           "system", which would render dark toasts on a dark-OS device. */}

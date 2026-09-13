@@ -100,6 +100,11 @@ exercising early.
     and lockout states), `relock-on-foreground.tsx`, `auth-notice.tsx`.
   - `npm run seed:owner -- <clerk-user-id> "<name>"` promotes the owner.
   - App metadata fixed (was still create-next-app boilerplate).
+  - Post-review fixes (see the decisions below): atomic attempt
+    counting, PIN digits masked, in-app sign-up removed, sign-out
+    clears the unlock cookie via `/signed-out`, a sign-out control on
+    the blocked-user notice, and a re-lock retry when connectivity
+    returns.
   - PIN recovery: `clearPinHash` + owner-only `resetWorkerPinAction`, a
     "Worker PINs" section on the owner's home
     (`components/farm/worker-pin-list.tsx`, `reset-pin-button.tsx`, with
@@ -118,11 +123,12 @@ exercising early.
 | `npm run build` passes | ✅ 7 routes, proxy compiled |
 | `npm run lint` passes | ✅ exit 0 (after fixing a `set-state-in-effect` violation in the lockout countdown) |
 | Owner signs in through Clerk and reaches the app | ✅ walked in a browser. Clerk sign-up → "Almost there" with the account id shown → `npm run seed:owner` → reload showed "Owner — full access" |
-| A worker invited from the Clerk dashboard is auto-created | ✅ a real `user.created` delivery through `clerk webhooks listen` (relay `forward_status: 200`, 5.6s), creating `user_3JHgMrDrQjtOV5XYPCFJYqZh962` as `WORKER`/`active` with `pinHash` null |
+| A worker invited from the Clerk dashboard is auto-created | ✅ a real `user.created` delivery through `clerk webhooks listen` (relay `forward_status: 200`, 5.6s), creating the invited test account as `WORKER`/`active` with `pinHash` null |
 | Worker is prompted to set a PIN on first login | ✅ sign-in went to `GET /set-pin`, not home; `POST /set-pin` stored a 161-char `salt:key` scrypt hash (32 + 1 + 128) and populated `pinSetAt` |
 | Reopening prompts for the PIN, not a full Clerk login | ✅ backgrounding the tab for ~3s re-locked to the PIN screen; no Clerk re-auth |
 | 5 wrong PINs lock entry for 60s (in the browser) | ✅ countdown shown live, correct PIN refused while locked; the counters were back to `0` / `null` after the eventual successful unlock, confirming the reset-on-success path |
 | A worker with no connection sees a clear offline state | ✅ DevTools offline → the explicit "checked on the server" message, no silent failure |
+| Extra — the attempt counter is atomic | ✅ five wrong attempts fired concurrently now cost exactly five (`pinFailedAttempts` = 5, account locked). A control replicating the old read-then-write pattern counted **1 of 5** on the same database — five parallel guesses used to cost one attempt, which would have let all 10,000 PINs be walked in parallel batches |
 | Extra — owner PIN reset | ✅ a worker row with a PIN and a live lockout was cleared: `pinHash`, `pinSetAt`, attempts and lockout all reset, the old PIN then returned `no-pin`, a new PIN was set and verified, and the old one failed against it |
 
 ## In Progress
@@ -172,13 +178,12 @@ complete and verified.
    instead of `node_modules`. Switch deliberately, not during a feature.
 8. **The Clerk CLI and the app keys point at different instances.**
    `clerk doctor` is green, but it only checks that keys exist. The CLI
-   is logged in as `lematinezz@gmail.com` and linked to "My Application"
-   (`steady-toucan-1681`), while `.env` holds keys for
-   `internal-ox-9204`. So `clerk users list`, `clerk webhooks listen`
-   and friends act on a different instance than the running app. Point
-   one at the other before leaning on the CLI for worker management.
-   The app ID in `03-auth.md` (`app_3JGm2l4Ov5eFb1AGgSXVS9pHNel`) 404s
-   for this login and was never used.
+   is logged into a different Clerk account and linked to a different
+   application than the one whose keys are in `.env`, so
+   `clerk users list`, `clerk webhooks listen` and friends act on a
+   different instance than the running app. Point one at the other
+   before leaning on the CLI for worker management. The app ID written
+   into `03-auth.md` 404s for the CLI login and was never used.
 9. **Re-lock threshold on foreground.** The spec says "opened or
    foregrounded". Opening is covered by the session cookie. For
    foregrounding, `relock-on-foreground.tsx` ignores hides shorter than
@@ -274,6 +279,23 @@ complete and verified.
   signed with `PIN_UNLOCK_SECRET` so it cannot be hand-written to skip
   the PIN. It is a convenience marker only — Clerk still authenticates
   every request.
+- **Failed PIN attempts are counted by the database, not by the app.**
+  A read-then-write of `pinFailedAttempts` let concurrent attempts
+  overwrite each other: measured, five parallel wrong guesses cost one
+  attempt, which reduces the five-try lockout to nearly no limit at all.
+  `{ increment: 1 }` makes each attempt cost exactly one, and the
+  lockout is computed from the value the database returns.
+- **A worker's PIN is never shown while it is typed.** The generated
+  `InputOTPSlot` prints the real character and is protected, so a filled
+  slot is styled `text-transparent` with a dot drawn over it instead of
+  editing `components/ui/`.
+- **Re-lock on foreground retries rather than locking optimistically.**
+  If `lockAction()` cannot reach the server the app stays unlocked and
+  retries on the next `online` event. Locking the UI locally would
+  strand a worker in front of a screen they cannot unlock, because the
+  PIN check is server-side by design. The residual window — an offline
+  device handed over between workers before the retry lands — is
+  accepted, and is the same trade-off as the PIN check itself.
 - **The gate lives in a route-group layout, not in `proxy.ts`.** Proxy
   runs before rendering and should not reach for Prisma; `app/(app)/`
   applies `resolveAuthGate()` once for every screen underneath it.

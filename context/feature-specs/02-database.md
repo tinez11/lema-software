@@ -1,4 +1,4 @@
-Read `Agents.md` before starting
+Read `AGENTS.md` before starting
 
 Were adding the central data layer: the Prisma schema and a server-only client.
 

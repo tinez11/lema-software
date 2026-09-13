@@ -35,7 +35,10 @@ async function main() {
     const owner = await prisma.user.upsert({
       where: { id },
       create: { id, name, role: "OWNER", active: true },
-      update: { role: "OWNER", active: true },
+      // `name` is updated too: an owner who signed in before being seeded
+      // already has a webhook-created row carrying whatever Clerk sent, and
+      // re-running this is how that gets corrected.
+      update: { name, role: "OWNER", active: true },
     })
 
     console.log(`Owner ready: ${owner.name} (${owner.id})`)

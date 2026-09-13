@@ -46,9 +46,14 @@
     re-reading the caller's identity from Clerk rather than a client prop
 - `proxy.ts` — `clerkMiddleware` at the project root. Next 16 renamed
   `middleware.ts` to `proxy.ts`; everything is protected except
-  `/sign-in`, `/sign-up`, `/__clerk/*` and the Clerk webhook
+  `/sign-in`, `/signed-out`, `/__clerk/*` and the Clerk webhook
+- `app/signed-out/` — where Clerk lands the browser after sign-out. The
+  unlock cookie is `httpOnly`, so only the server can drop it; without
+  this stop the cookie would outlive the session and let the same worker
+  back in on their next sign-in without a PIN
 - `app/(app)/` — the route group holding every real app screen. Its
-  layout applies the auth gate once, so no page has to remember to
+  layout applies the auth gate once, so no page underneath it has to
+  apply the gate again
 - `app/lock/`, `app/set-pin/` — outside that group on purpose: a locked
   worker has to be able to reach the screen the group redirected them to
 - `app/api/webhooks/clerk/` — creates the Prisma `User` row on
@@ -100,6 +105,17 @@
   and has not unlocked yet this session sees an explicit offline message
   rather than a silent failure. Work already entered is unaffected — it
   is queued locally and syncs later.
+- **There is no in-app sign-up.** Accounts are created by the owner in
+  the Clerk dashboard, and the webhook makes every new Clerk user a
+  `WORKER` — so an open sign-up page is a self-enrolment route into farm
+  data. The scaffolded `/sign-up` route was removed and is not a public
+  route. This closes the app's own front door; the matching **deployment
+  requirement** is to restrict sign-ups on the Clerk instance itself
+  (dashboard → restrictions), because Clerk's hosted sign-up page is
+  reachable independently of this app. The Clerk backend SDK cannot read
+  that setting back — `InstanceAPI` exposes only `get()` (id,
+  environment, allowed origins) and a write-only `updateRestrictions()`
+  — so it cannot be asserted at boot and has to be checked by a human.
 - **A forgotten PIN is reset by the owner, never by the worker.** Anyone
   sitting at a locked screen already holds a cached Clerk session on
   that device — precisely the case the PIN exists to stop — so a

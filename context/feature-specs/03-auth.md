@@ -1,4 +1,4 @@
-Read `Agents.md` before starting
+Read `AGENTS.md` before starting
 
 Were adding authentication: Clerk for real identity, plus a PIN layer
 for fast worker switching on shared devices.

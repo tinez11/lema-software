@@ -135,7 +135,7 @@ export function PinPad({
           }}
           onComplete={submit}
           disabled={pending || locked}
-          // A numeric keypad on phones, and the digits stay hidden over a shoulder.
+          // Brings up a numeric keypad on phones.
           inputMode="numeric"
           pattern="[0-9]*"
           aria-label={`${PIN_LENGTH}-digit PIN`}
@@ -146,7 +146,15 @@ export function PinPad({
                 key={index}
                 index={index}
                 aria-invalid={feedback.kind === "error" || locked}
-                className="size-14 rounded-xl border-2 text-2xl font-semibold first:rounded-xl last:rounded-xl"
+                className={cn(
+                  "size-14 rounded-xl border-2 text-2xl font-semibold first:rounded-xl last:rounded-xl",
+                  // The generated slot prints the real digit, and it is not ours
+                  // to edit. A filled slot hides its character and draws a dot
+                  // over it instead, so a PIN entered in a barn doorway is not
+                  // readable from a step away.
+                  pin.length > index &&
+                    "text-transparent after:absolute after:inset-0 after:m-auto after:size-3.5 after:rounded-full after:bg-foreground after:content-['']"
+                )}
               />
             ))}
           </InputOTPGroup>

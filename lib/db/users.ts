@@ -151,8 +151,14 @@ export async function verifyPinHash(
   if (!user.pinHash) return { status: "no-pin" }
 
   // A lockout that has expired also clears the failures that caused it, so the
-  // worker gets a full set of attempts back rather than one.
-  const priorFailures = user.pinLockedUntil ? 0 : user.pinFailedAttempts
+  // worker gets a full set of attempts back rather than one. Conditioned on the
+  // expiry we just read, so a lockout set by a concurrent attempt is not wiped.
+  if (user.pinLockedUntil) {
+    await prisma.user.updateMany({
+      where: { id: userId, pinLockedUntil: user.pinLockedUntil },
+      data: { pinFailedAttempts: 0, pinLockedUntil: null },
+    })
+  }
 
   // Checked after the lockout so a malformed entry cannot be used to probe
   // whether an account is locked.
@@ -169,23 +175,26 @@ export async function verifyPinHash(
     return { status: "ok" }
   }
 
-  const failures = priorFailures + 1
+  // Incremented by the database, not by re-writing a count read earlier: two
+  // attempts racing would otherwise both read N and both write N+1, handing an
+  // attacker a free guess per race. `increment` makes each attempt cost exactly
+  // one, and the returned value is the committed count the lockout is based on.
+  const { pinFailedAttempts: failures } = await prisma.user.update({
+    where: { id: userId },
+    data: { pinFailedAttempts: { increment: 1 } },
+    select: { pinFailedAttempts: true },
+  })
 
   if (failures >= MAX_PIN_ATTEMPTS) {
-    const lockedUntil = new Date(now.getTime() + PIN_LOCKOUT_SECONDS * 1000)
+    const lockedUntil = new Date(Date.now() + PIN_LOCKOUT_SECONDS * 1000)
 
     await prisma.user.update({
       where: { id: userId },
-      data: { pinFailedAttempts: failures, pinLockedUntil: lockedUntil },
+      data: { pinLockedUntil: lockedUntil },
     })
 
     return { status: "locked", lockedUntil }
   }
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: { pinFailedAttempts: failures, pinLockedUntil: null },
-  })
 
   return { status: "wrong", attemptsRemaining: MAX_PIN_ATTEMPTS - failures }
 }

@@ -16,6 +16,25 @@ export function RelockOnForeground() {
 
   useEffect(() => {
     let hiddenAt: number | null = null
+    // Set when a re-lock could not reach the server, so it can be retried the
+    // moment the device is back online instead of being dropped.
+    let lockPending = false
+
+    function lock() {
+      // If the device is offline this throws and the app stays unlocked until
+      // the retry below lands. Locking the UI locally instead would strand a
+      // worker in front of a screen they cannot unlock — the PIN is checked
+      // server-side, so with no signal there is no way back in. See the
+      // "PIN check is central" note in architecture.md.
+      lockAction()
+        .then(() => {
+          lockPending = false
+          router.refresh()
+        })
+        .catch(() => {
+          lockPending = true
+        })
+    }
 
     function onVisibilityChange() {
       if (document.visibilityState === "hidden") {
@@ -28,19 +47,20 @@ export function RelockOnForeground() {
       if (hiddenAt === null || Date.now() - hiddenAt < 2000) return
 
       hiddenAt = null
+      lock()
+    }
 
-      // If the device is offline this throws, and the app simply stays
-      // unlocked — the alternative is locking a worker out of a screen they
-      // are standing in front of with no way back in.
-      lockAction()
-        .then(() => router.refresh())
-        .catch(() => undefined)
+    function onOnline() {
+      if (lockPending) lock()
     }
 
     document.addEventListener("visibilitychange", onVisibilityChange)
+    window.addEventListener("online", onOnline)
 
-    return () =>
+    return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange)
+      window.removeEventListener("online", onOnline)
+    }
   }, [router])
 
   return null
