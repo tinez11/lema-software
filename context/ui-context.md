@@ -136,6 +136,33 @@ is also full width; on owner screens it sizes to its content.
 Sibling controls that must match that height — a PIN field, a quantity
 stepper — use `h-14` too, so a worker's row of targets is one size.
 
+## Entry Controls
+
+The two controls a data-entry screen is built from. Both are `h-14`
+with a 2px edge on **both** owner and worker screens: the owner/worker
+split is panel density and button width, not target size, and a control
+that changes size between roles is a second thing to get right for no
+gain.
+
+- **Quantity stepper** (`components/farm/quantity-stepper.tsx`) —
+  `−` / value / `+`, the two buttons square at `h-14 w-14`, the value a
+  centred `text-lg font-semibold tabular-nums` field with its unit set
+  inside the trailing edge in muted type. The field is typeable, not
+  only tappable: 40 liters is 80 taps otherwise. Unaware of milk, so a
+  harvest weight and a stock count reuse it as-is.
+- **Session toggle** (`components/farm/session-toggle.tsx`) — two
+  equal `h-14` cells in a `grid-cols-2`. Selected is a filled
+  `bg-moss` / `text-moss-foreground` cell, which is the module accent
+  doing the job it is defined for. Native radios sit under the labels,
+  so arrow keys, the checked state and the group name come for free.
+  A session already logged for the day carries a check mark rather
+  than being disabled — the clash is worth seeing before the tap, but
+  the server is what refuses it.
+
+A choice with a small, fixed set of options gets one cell per option at
+full width, never a `Select`: a dropdown on a phone costs two taps and
+hides the options until the first one.
+
 ## Icons
 
 Lucide React . Outline-style icons only. `h-4 w-4` (16px) for inline

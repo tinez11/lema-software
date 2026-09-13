@@ -2,17 +2,22 @@
 
 ## Current Phase
 
-Phase 0 — Foundation: **complete**. Design system, data layer, and auth
-are all in place, and every check in all three specs has been verified,
+Phase 1 — core data entry. Phase 0 (design system, data layer, auth) is
+complete and every check in all three of its specs was verified,
 including the owner and worker flows walked end to end in a browser
 against the live Clerk instance and Postgres.
 
+The first write path — logging a milk entry — is built and verified at
+the data and action layers. The browser walkthrough of that screen is
+the one thing still outstanding; see "In Progress".
+
 ## Current Goal
 
-Phase 1 — core data entry for a single module, end to end. Cows & Milk
-is the natural first module: `MilkRecord` is the simplest shape, and its
-`@@unique([date, session])` constraint is the invariant most worth
-exercising early.
+Finish Phase 1: Cows & Milk end to end. `MilkRecord` is the simplest
+shape and its `@@unique([date, session])` constraint is the invariant
+most worth exercising early, so it went first. Land & Produce and Shop
+get the same treatment next, and only then does the three-module owner
+dashboard become buildable.
 
 ## Completed
 
@@ -131,23 +136,92 @@ exercising early.
 | Extra — the attempt counter is atomic | ✅ five wrong attempts fired concurrently now cost exactly five (`pinFailedAttempts` = 5, account locked). A control replicating the old read-then-write pattern counted **1 of 5** on the same database — five parallel guesses used to cost one attempt, which would have let all 10,000 PINs be walked in parallel batches |
 | Extra — owner PIN reset | ✅ a worker row with a PIN and a live lockout was cleared: `pinHash`, `pinSetAt`, attempts and lockout all reset, the old PIN then returned `no-pin`, a new PIN was set and verified, and the old one failed against it |
 
+- **`04-milk-entry.md` — the first write path, end to end** ✅ (browser
+  walkthrough outstanding — see "In Progress")
+  - `lib/db/milk.ts` gained its write half: `createMilkRecord` returns
+    a typed `duplicate` carrying the record already in the slot instead
+    of letting `P2002` surface, and `updateMilkRecord` enforces
+    invariant 2's sibling rule — own entry, logged today — returning
+    `not-yours` / `too-old` rather than throwing.
+  - `farmDate()` is the single conversion between a clock instant and
+    the `@db.Date` civil day a record is filed under.
+  - New reads for the two screens: `getMilkRecordsForDate` (optionally
+    scoped to one worker) and `getRecentMilkRecords`, both selecting the
+    recorder as `{ id, name }` — never `include`, which would carry
+    `pinHash` out of `lib/db/` and break invariant 6.
+  - `app/(app)/milk/actions.ts` — `logMilkAction` and `editMilkAction`.
+    Each resolves the caller through `resolveAuthGate()`, validates with
+    `zod`, and calls `refresh()` on success. Neither accepts a user id,
+    and `logMilkAction` derives the date server-side.
+  - `zod` 4.6.4 installed — the first use of the validator
+    `code-standards.md` has always called for.
+  - `lib/milk-config.ts` — entry bounds shared by the stepper and the
+    action, following the `pin-config.ts` precedent.
+  - `components/farm/quantity-stepper.tsx` and `session-toggle.tsx`, the
+    first two entry controls, plus `milk-entry-form.tsx` and
+    `milk-history-list.tsx` composing them into the screen both roles
+    use.
+  - `app/(app)/page.tsx` now routes on role: `WORKER` → the milk entry
+    screen and their own "logged today" list, nothing else; `OWNER` →
+    the Cows & Milk module home, the same form plus a recent-history
+    list across all workers. The owner's "Worker PINs" section was kept
+    — a forgotten PIN still has no other way out.
+
+### Verification of `04-milk-entry.md`
+
+Run against the live Prisma Postgres with two temporary worker rows,
+all of which — and their records — were deleted afterwards; the table
+was back to 0 rows.
+
+| Check from the spec | Result |
+| --- | --- |
+| A worker logs a morning entry, then an evening entry, same day — both succeed | ✅ both returned `{ ok: true }`; the second is not blocked by the first, because the constraint is on the pair |
+| A second attempt at an already-logged session returns the typed duplicate result | ✅ a different worker's 20 L morning entry came back `{ ok: false, reason: "duplicate" }` carrying the 12 L record already in the slot — no thrown `P2002` |
+| A worker can edit their own same-day entry | ✅ 12 → 13.5 L |
+| Editing another worker's entry is rejected with the typed reason | ✅ `not-yours`. An id that does not exist returns the same reason rather than a third one, so a caller cannot probe for real ids |
+| Editing their own entry from a prior day is rejected | ✅ `too-old` |
+| Owner's module home shows entries from more than one worker in one list | ✅ `getRecentMilkRecords` returned both workers' names in one result, newest day first |
+| `npm run build` passes | ✅ compiled in 8.9s, 8 pages, 7 routes |
+| `npm run lint` passes | ✅ exit 0 |
+| Extra — the joined recorder carries no `pinHash` | ✅ the `recordedBy` object on every row has exactly the keys `id` and `name` (invariant 6) |
+| Extra — a stored date reads back as the day it was logged | ✅ every row's `date` equalled `farmDate()` exactly, and `farmDate()` strips the time of day from any instant it is handed |
+| Extra — action input validation | ✅ 12 cases through the action's schema: an unknown session, a missing session, liters as a string, zero, negative, over the 2000 L ceiling, `NaN`, `Infinity` and a `null` body are all rejected; a client-supplied `recordedById` is stripped and never reaches the query helper |
+| Extra — the action endpoint is not reachable unauthenticated | ✅ against a running dev server, a forged `Next-Action` POST to `/` was 307'd to sign-in by `proxy.ts`, before any action code ran |
+| Extra — routes compile and the gate holds | ✅ `GET /` and `GET /milk` both 307 to Clerk sign-in; `/milk` has no page by design, only `actions.ts` |
+
 ## In Progress
 
-Nothing — `01-design-system.md`, `02-database` and `03-auth.md` are all
-complete and verified.
+`04-milk-entry.md` is built and verified everywhere it can be without a
+Clerk session. Two of its checks are browser work and are **not yet
+done**:
+
+1. The unique(date, session) constraint exercised **through the real
+   UI** — log a session, then log it again, and confirm the screen says
+   "already logged at N L by X" rather than crashing. The constraint
+   itself is proven at the data layer; what is unproven is the message
+   reaching the screen.
+2. The same-day edit and its two refusals walked in the browser.
+
+Also worth watching on that first walkthrough: the entry form and the
+"logged today" list are server-rendered, and the actions call
+`refresh()` to re-render them in the action's own response. If a saved
+entry does not appear in the list without a manual reload, that is the
+thing to look at first.
 
 ## Next Up
 
-1. Phase 1 — core data entry for one module end to end. This is where
-   the write path lands: server actions plus the `lib/db/` write helpers
-   they call. Per `ai-workflow-rules.md`, Phase 3 (PowerSync offline
-   sync) does not start until Phase 1 is complete.
-2. `components/farm/` composed components (metric cards, the "needs
-   attention" list, quantity steppers) once there is real data to show.
-   `pin-pad.tsx` already establishes the worker treatment they follow.
-3. Replace the placeholder home in `app/(app)/page.tsx` with the real
-   owner dashboard and the worker's single entry screen — the split is
-   described in `ui-context.md` but nothing routes on role yet.
+1. Finish the walkthrough above, then Land & Produce and Shop get their
+   own write paths — same shape: `lib/db/` write helpers, an
+   `app/(app)/<module>/actions.ts`, and the screens. Per
+   `ai-workflow-rules.md`, Phase 3 (PowerSync offline sync) does not
+   start until Phase 1 is complete.
+2. The three-module owner dashboard — the metric card grid and the
+   cross-module "needs attention" list — once all three modules can be
+   written to. Building it against one module would leave two-thirds of
+   it pointing at nothing.
+3. The animal registry, health records and breeding records: the rest
+   of Cows & Milk, deliberately left out of the milk write path because
+   they neither block it nor share it.
 
 ## Open Questions
 
@@ -206,6 +280,30 @@ complete and verified.
    command and was used here against the shared Prisma Postgres
    instance. Deploys should run `prisma migrate deploy`; decide where
    that runs (CI step vs. release script) before anything is deployed.
+12. **Which clock decides "today".** `farmDate()` builds a record's
+   civil day from the *server's* timezone, and `updateMilkRecord`'s
+   same-day rule compares against it. Locally that is the farm's
+   timezone; on a host running UTC it is not, and an evening milking
+   logged after the UTC rollover would file under tomorrow and be
+   uneditable the moment it was saved. The fix is a single configured
+   farm timezone (env var) that `farmDate()` and the screens' date
+   formatting both read. Needed before the first deploy, not before the
+   next feature — nothing else in the app has a date-only column yet.
+13. **The owner cannot edit a worker's entry.** `updateMilkRecord`
+   checks ownership with no owner branch, so today an owner can correct
+   only their own same-day entries — narrower than the "owner has full
+   edit access" line `architecture.md` used to carry (now corrected
+   there). A role parameter is not the answer; `code-standards.md`
+   forbids a helper that branches on role. If the owner needs the
+   reach, it is a second, separately named export next to it. Wait for
+   a real need — a worker who mistyped and went home — rather than
+   building it speculatively.
+14. **The worker's sync-status indicator.** `ui-context.md` says a
+   worker entry screen shows a "saved locally" indicator at all times.
+   There is nothing local to save to until PowerSync lands in Phase 3,
+   so the entry screen currently says nothing rather than claiming a
+   local save it did not make. Add the indicator with the sync layer,
+   not before.
 
 ## Architecture Decisions
 
@@ -328,6 +426,63 @@ complete and verified.
   internally.** The Next 16 data-security guide recommends installing it
   so lint rules don't flag an extraneous dependency.
 
+- **A duplicate slot is a result, not an exception.** The
+  `@@unique([date, session])` constraint *is* invariant 1, so a second
+  entry for a session is an ordinary thing for a worker to try, not a
+  fault. `createMilkRecord` catches `P2002` and returns
+  `{ ok: false, reason: "duplicate", existing }` so the screen can name
+  the liters and the person already in the slot. Catching it — rather
+  than reading the slot first and then writing — is also the only
+  version that is actually safe: a read-then-write leaves a window in
+  which two devices both find the slot empty, and the constraint is
+  what closes it.
+- **The create retries once, and only when the slot is empty again.**
+  "Someone holds this slot" and "the row that held it has been deleted"
+  are different races. If the post-`P2002` lookup finds nothing, the
+  slot is free and a single retry takes it; a second failure with
+  nothing to point at throws, because that is a real fault and not
+  something to report to a worker as a duplicate.
+- **`updateMilkRecord` takes the editing user's id, not a role.** The
+  "own recent entries" rule is enforced inside `lib/db/`, next to
+  invariant 2's financial split and for the same reason: a permission
+  layer above the query is one that a later caller can route around.
+  A missing record returns `not-yours` rather than a third reason, so
+  an id the caller may not edit cannot be probed for existence.
+- **The date comes from the server, the record id comes from the
+  client.** `logMilkAction` derives today itself; `editMilkAction`
+  accepts an id and re-checks ownership against the session. This is
+  the split the Next 16 server-actions guide describes — the client
+  says *which* record, never *whose* — and it matters because a
+  client-supplied date would let a caller write into a slot they are
+  then not allowed to edit.
+- **Actions use `refresh()`, not `revalidatePath()`.** Both screens read
+  Postgres directly through Prisma, so there is no cached data to
+  invalidate; what has to change is the current route's render.
+  `refresh()` is what Next 16 documents for exactly that, and it ships
+  the new RSC payload inside the action's own response rather than
+  costing a second round trip.
+- **Entry bounds live in `lib/milk-config.ts`, shared by both sides.**
+  Same shape as `pin-config.ts`, same reason: the stepper is a client
+  component, and a maximum the UI offers but the action rejects is a
+  bug that only shows up in the field. The file also owns the rounding,
+  which is what keeps a run of `+ 0.5` taps from storing
+  `12.300000000000001`.
+- **`MilkSession` is imported as a type in client components, as a
+  value only on the server.** `z.enum(MilkSession)` in the action reads
+  the real enum, so a third session added to the schema is a type error
+  rather than a silently unvalidated value; the toggle takes the
+  type alone, so the Prisma client never reaches the browser bundle.
+- **Both roles get `h-14` controls; only density differs.** The
+  owner/worker table in `ui-context.md` splits panel edge, padding and
+  button width — not target size. One control that renders at two
+  heights is a second thing to keep right for no gain, and the owner
+  uses the same phone.
+- **The owner's home is one module, not the dashboard.** The spec was
+  explicit and it is the right call: a three-module dashboard built now
+  would have two cards reading from modules with no write path. The
+  owner's "Worker PINs" section stays on that page, because removing it
+  would take away the only route out of a forgotten PIN.
+
 ## Session Notes
 
 - Next.js here is 16.x — conventions differ from older App Router
@@ -362,6 +517,14 @@ complete and verified.
 - To deliver Clerk webhooks to localhost: `clerk webhooks listen
   --forward-to http://localhost:3000/api/webhooks/clerk`, then put the
   signing secret it prints into `CLERK_WEBHOOK_SIGNING_SECRET`.
+- A Postgres `date` column round-trips through Prisma as **midnight
+  UTC**. Build it with `Date.UTC(...)` and format it back with
+  `timeZone: "UTC"`, or a server west of Greenwich renders every entry
+  a day early. `farmDate()` is the only place that conversion happens.
+- `zod` 4 renamed the error options: it is `z.number({ error: "…" })`
+  now, not `invalid_type_error` / `required_error`. `z.enum()` also
+  accepts Prisma's generated enum object directly, so the action's
+  schema follows `schema.prisma` instead of restating it.
 - A Clerk CLI link derived from the **git remote** overrides
   `CLERK_SECRET_KEY` in `.env`, so the CLI can silently operate on a
   different instance than the running app while `clerk doctor` stays

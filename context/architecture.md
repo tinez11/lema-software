@@ -22,7 +22,11 @@
   `code-standards.md`)
 - `components/farm/` — custom composed components shared across
   modules (metric cards, the "needs attention" list, quantity
-  steppers, etc.)
+  steppers, etc.), plus the module-specific screens composed from them.
+  `quantity-stepper.tsx` is the genuinely shared one — a harvest weight
+  and a stock count are the same control — while `session-toggle.tsx`,
+  `milk-entry-form.tsx` and `milk-history-list.tsx` belong to Cows &
+  Milk, the way `pin-pad.tsx` belongs to auth
 - `lib/utils.ts` — the `cn()` class-merging helper, re-exported from the
   `cn` package (shadcn's drop-in replacement for `clsx` +
   `tailwind-merge`)
@@ -30,6 +34,11 @@
   functions (`animals.ts`, `milk.ts`, `land.ts`, `shop.ts`), server-only.
   Every file in here starts with `import "server-only"`, so importing one
   from a client component is a build error rather than a runtime leak.
+- `lib/milk-config.ts` — the bounds of a herd-total entry (minimum,
+  ceiling, stepper increment, decimal places) and the rounding both
+  sides apply. Not `server-only`, for the same reason as
+  `pin-config.ts`: the stepper is a client component and must offer
+  exactly the range the server action accepts
 - `lib/sync/` — PowerSync client setup and sync rule configuration
 - `lib/auth/` — Clerk configuration and the PIN-unlock layer that
   switches between already-authenticated worker profiles on a shared
@@ -53,7 +62,16 @@
   back in on their next sign-in without a PIN
 - `app/(app)/` — the route group holding every real app screen. Its
   layout applies the auth gate once, so no page underneath it has to
-  apply the gate again
+  apply the gate again. `app/(app)/page.tsx` routes on role: a worker
+  lands on the milk entry screen itself, an owner on the Cows & Milk
+  module home
+- `app/(app)/milk/actions.ts` — the module's server actions. A module's
+  writes live in an `actions.ts` beside its route rather than in
+  `lib/db/`, because this is where the caller's identity is resolved
+  (from Clerk, never from a prop) and its input validated with `zod`
+  before a query helper is reached. The folder holds no `page.tsx`: the
+  screens are reached through `/`, not `/milk`, until there is more than
+  one module to switch between
 - `app/lock/`, `app/set-pin/` — outside that group on purpose: a locked
   worker has to be able to reach the screen the group redirected them to
 - `app/api/webhooks/clerk/` — creates the Prisma `User` row on
@@ -80,6 +98,15 @@
   connection.
 - **Object/blob storage**: photos only (animal photos, product
   images). Postgres stores just the URL.
+- **Civil days, not timestamps.** `MilkRecord.date` is a Postgres
+  `date` — no time, no zone — because invariant 1 makes (date, session)
+  the identity of a record. Prisma reads one back as midnight UTC, so
+  every date written has to be built the same way or "today" never
+  compares equal to a stored date and the constraint guards the wrong
+  thing. `farmDate()` in `lib/db/milk.ts` is that one conversion, and
+  every screen formats those dates back with `timeZone: "UTC"`. Which
+  civil day it is still comes from the *server's* clock — see open
+  question 12.
 
 ## Auth and Access Model
 
@@ -91,7 +118,21 @@
 - Every record carries the id of the user who created it
   (`enteredById` / `recordedById` in the schema).
 - A worker can edit only their own recent entries; the owner has full
-  read/edit access across everything, including costs and profit.
+  read access across everything, including costs and profit.
+  "Their own recent entries" is enforced in the same place invariant 2
+  is — inside `lib/db/`, not in the action above it. `updateMilkRecord`
+  takes the editing user's id and succeeds only when it matches the
+  record's `recordedById` *and* the record's date is today; anything
+  else is a typed `not-yours` / `too-old`, never a thrown error. Each
+  module's write helper repeats that check rather than sharing a
+  permission layer, so the rule is greppable per model.
+- **The owner's edit reach is currently the same as a worker's.** The
+  ownership check above has no owner branch: an owner can correct their
+  own same-day entry and no one else's. Deliberate for now — a helper
+  that takes a role and branches internally is exactly what
+  `code-standards.md` forbids, so an owner override has to be a second,
+  separately named export, and nothing in Phase 1 needs one yet. Logged
+  as open question 13.
 - Revoking a worker's access takes effect immediately once online, but
   any device that hasn't reconnected since the revocation will still
   accept that worker's old PIN until it next syncs — a known,
