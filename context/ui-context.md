@@ -150,18 +150,33 @@ gain.
   inside the trailing edge in muted type. The field is typeable, not
   only tappable: 40 liters is 80 taps otherwise. Unaware of milk, so a
   harvest weight and a stock count reuse it as-is.
-- **Session toggle** (`components/farm/session-toggle.tsx`) — two
-  equal `h-14` cells in a `grid-cols-2`. Selected is a filled
-  `bg-moss` / `text-moss-foreground` cell, which is the module accent
-  doing the job it is defined for. Native radios sit under the labels,
-  so arrow keys, the checked state and the group name come for free.
-  A session already logged for the day carries a check mark rather
-  than being disabled — the clash is worth seeing before the tap, but
-  the server is what refuses it.
+- **Choice grid** (`components/farm/choice-grid.tsx`) — one `h-14` cell
+  per option in a 2-, 3- or 4-column grid. Selected is a filled cell in
+  the module's accent (`accent="moss" | "gold" | "ochre"`), which is
+  those colours doing the job they are defined for. Native radios sit
+  under the labels, so arrow keys, the checked state and the group name
+  come for free. An option can carry a check mark — already logged,
+  already used — rather than being disabled: the clash is worth seeing
+  before the tap, but the server is what refuses it.
+  `session-toggle.tsx` is the Cows & Milk instance of it, adding the two
+  sessions and their icons; the harvest unit picker is another.
 
 A choice with a small, fixed set of options gets one cell per option at
 full width, never a `Select`: a dropdown on a phone costs two taps and
 hides the options until the first one.
+
+A choice whose set **grows with the farm** — a crop cycle picker, later
+a stock item — does get a `Select`, at `h-14` with a 2px edge so it
+still matches the row it sits in. The line is whether the options are
+knowable in advance, not how many there happen to be today.
+
+## Module Accents in Practice
+
+Each module's accent marks its own screens, and the same three roles
+recur: the header eyebrow beside the module icon, the selected cell of a
+choice grid, and the quantity on a history row. Cows & Milk is moss,
+Land & Produce gold, Shop ochre. Rust stays reserved for attention and
+destructive actions and is never a module's colour.
 
 ## Icons
 

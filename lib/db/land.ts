@@ -1,8 +1,15 @@
 import "server-only"
 
-import type { CropCycleStatus, Prisma } from "@prisma/client"
+import { Prisma } from "@prisma/client"
+import type {
+  CropCycle,
+  CropCycleStatus,
+  Field,
+  HarvestRecord,
+} from "@prisma/client"
 
 import { prisma } from "./client"
+import { farmDate } from "./dates"
 
 // Thin read helpers for Land & Produce: the field registry, crop cycles, and
 // the input/harvest records attached to a cycle.
@@ -52,6 +59,34 @@ export function getCropCycles(
 
 export function getCropCycleById(id: string) {
   return prisma.cropCycle.findUnique({ where: { id } })
+}
+
+/**
+ * Just enough to fill a harvest form's picker: what to call each cycle and
+ * which field it is in. No dates, no status — a form that only has to identify
+ * a cycle has no business reading the rest of it, and this keeps the payload
+ * small on a phone.
+ *
+ * The cost is that two cycles of the same crop in the same field read
+ * identically in the picker. That cannot happen yet — nothing closes a cycle,
+ * so there is only ever one season's worth — but it is the first thing to fix
+ * when status transitions land. See open question 17.
+ */
+const cropCycleForSelection = {
+  id: true,
+  cropType: true,
+  field: { select: { name: true } },
+} satisfies Prisma.CropCycleSelect
+
+export type CropCycleForSelection = Prisma.CropCycleGetPayload<{
+  select: typeof cropCycleForSelection
+}>
+
+export function getCropCyclesForSelection(): Promise<CropCycleForSelection[]> {
+  return prisma.cropCycle.findMany({
+    select: cropCycleForSelection,
+    orderBy: [{ plantingDate: "desc" }, { cropType: "asc" }],
+  })
 }
 
 // ───────────── Inputs ─────────────
@@ -105,4 +140,158 @@ export function sumHarvestQuantity(cropCycleId: string) {
     where: { cropCycleId },
     _sum: { quantity: true },
   })
+}
+
+/**
+ * The same shape `getRecentMilkRecords` returns: the record plus who logged it
+ * and which cycle it belongs to, with the recorder selected as `{ id, name }`.
+ * Never `include` — that would carry `pinHash` out of this directory and break
+ * invariant 6.
+ */
+const harvestRecordWithContext = {
+  id: true,
+  cropCycleId: true,
+  date: true,
+  quantity: true,
+  unit: true,
+  qualityGrade: true,
+  recordedById: true,
+  createdAt: true,
+  updatedAt: true,
+  recordedBy: { select: { id: true, name: true } },
+  cropCycle: { select: { cropType: true, field: { select: { name: true } } } },
+} satisfies Prisma.HarvestRecordSelect
+
+export type HarvestRecordWithContext = Prisma.HarvestRecordGetPayload<{
+  select: typeof harvestRecordWithContext
+}>
+
+/** Recent harvests, newest first. Pass a cycle id to scope it to one crop. */
+export function getHarvestHistory(
+  cropCycleId?: string,
+  options: { take?: number } = {}
+): Promise<HarvestRecordWithContext[]> {
+  return prisma.harvestRecord.findMany({
+    where: cropCycleId ? { cropCycleId } : undefined,
+    select: harvestRecordWithContext,
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    take: options.take ?? 20,
+  })
+}
+
+// ───────────── Writes ─────────────
+//
+// Creating a `Field` or a `CropCycle` is owner-only, and that check lives in
+// `app/(app)/land/actions.ts` where the caller's identity is resolved — not as
+// a role parameter here. `code-standards.md` forbids a helper that takes a
+// role and branches on it; the two-export split that invariant 2 uses is for
+// *columns*, and neither of these helpers returns a financial one, so there is
+// nothing here to split. Logging a harvest is open to both roles.
+
+/**
+ * Registers a field.
+ *
+ * `Field` is the one model in the schema with no `enteredById` — it is
+ * reference data, not a transactional record, so there is nothing to attribute
+ * and no owner id to store. The spec's signature named one; it is absent here
+ * rather than accepted and silently dropped, which would read as attribution
+ * that isn't happening. See open question 15.
+ */
+export function createField(
+  name: string,
+  sizeAcres: number | null,
+  locationNote: string | null
+): Promise<Field> {
+  return prisma.field.create({ data: { name, sizeAcres, locationNote } })
+}
+
+export type CreateCropCycleResult =
+  | { ok: true; cycle: CropCycle }
+  | { ok: false; reason: "unknown-field" }
+
+/**
+ * Opens a crop cycle on a field. Status is whatever the schema defaults to
+ * (`PLANNED`) — nothing in this unit moves a cycle through GROWING or
+ * HARVESTED, and a transition action is a deliberate follow-up.
+ *
+ * A `fieldId` that does not exist comes back typed rather than as a raw
+ * foreign-key error. The picker only offers real fields, so this is about a
+ * forged POST, not the screen.
+ */
+export async function createCropCycle(
+  fieldId: string,
+  cropType: string,
+  plantingDate: Date,
+  expectedHarvestDate: Date | null,
+  enteredById: string
+): Promise<CreateCropCycleResult> {
+  try {
+    return {
+      ok: true,
+      cycle: await prisma.cropCycle.create({
+        data: {
+          fieldId,
+          cropType,
+          plantingDate: farmDate(plantingDate),
+          expectedHarvestDate: expectedHarvestDate
+            ? farmDate(expectedHarvestDate)
+            : null,
+          enteredById,
+        },
+      }),
+    }
+  } catch (error) {
+    if (!isMissingReference(error)) throw error
+
+    return { ok: false, reason: "unknown-field" }
+  }
+}
+
+export type CreateHarvestRecordResult =
+  | { ok: true; record: HarvestRecord }
+  | { ok: false; reason: "unknown-cycle" }
+
+/**
+ * Logs a harvest against a cycle. A plain insert, deliberately: unlike
+ * `MilkRecord`, nothing here is unique per day. A cycle can legitimately be
+ * harvested more than once — a partial pick, then the rest a few days later —
+ * so two entries on one date are correct data, not a duplicate to catch.
+ */
+export async function createHarvestRecord(
+  cropCycleId: string,
+  date: Date,
+  quantity: number,
+  unit: string,
+  recordedById: string
+): Promise<CreateHarvestRecordResult> {
+  try {
+    return {
+      ok: true,
+      record: await prisma.harvestRecord.create({
+        data: {
+          cropCycleId,
+          date: farmDate(date),
+          quantity,
+          unit,
+          recordedById,
+        },
+      }),
+    }
+  } catch (error) {
+    if (!isMissingReference(error)) throw error
+
+    return { ok: false, reason: "unknown-cycle" }
+  }
+}
+
+/**
+ * A foreign key pointing at a row that isn't there. Caught rather than
+ * pre-checked with a read: a read-then-write says nothing about the state at
+ * the moment of the insert, and the constraint does.
+ */
+function isMissingReference(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    (error.code === "P2003" || error.code === "P2025")
+  )
 }

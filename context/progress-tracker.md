@@ -7,17 +7,21 @@ complete and every check in all three of its specs was verified,
 including the owner and worker flows walked end to end in a browser
 against the live Clerk instance and Postgres.
 
-The first write path — logging a milk entry — is built and verified at
-the data and action layers. The browser walkthrough of that screen is
-the one thing still outstanding; see "In Progress".
+Two of the three write paths are built and verified at the data and
+action layers: milk entry (`04-milk-entry.md`) and harvest entry
+(`05-land-produce.md`). The browser walkthroughs of both screens are
+what remain; see "In Progress".
 
 ## Current Goal
 
-Finish Phase 1: Cows & Milk end to end. `MilkRecord` is the simplest
-shape and its `@@unique([date, session])` constraint is the invariant
-most worth exercising early, so it went first. Land & Produce and Shop
-get the same treatment next, and only then does the three-module owner
-dashboard become buildable.
+Finish Phase 1: all three modules writable end to end. Cows & Milk went
+first because `MilkRecord` is the simplest shape and its
+`@@unique([date, session])` constraint is the invariant most worth
+exercising early. Land & Produce followed, deliberately without its
+money-bearing `InputRecord`. Shop is last, and it is the one that forces
+open question 6 — how a `Decimal` crosses the server/client boundary —
+because it cannot be built without money on screen. Only once all three
+write does the three-module owner dashboard become buildable.
 
 ## Completed
 
@@ -189,11 +193,65 @@ was back to 0 rows.
 | Extra — the action endpoint is not reachable unauthenticated | ✅ against a running dev server, a forged `Next-Action` POST to `/` was 307'd to sign-in by `proxy.ts`, before any action code ran |
 | Extra — routes compile and the gate holds | ✅ `GET /` and `GET /milk` both 307 to Clerk sign-in; `/milk` has no page by design, only `actions.ts` |
 
+- **`05-land-produce.md` — the second write path** ✅ (browser
+  walkthrough outstanding — see "In Progress")
+  - `lib/db/land.ts` gained its write half: `createField`,
+    `createCropCycle` (defaulting to `PLANNED`) and `createHarvestRecord`.
+    The two that take a foreign key return a typed `unknown-field` /
+    `unknown-cycle` instead of letting a `P2003` surface.
+  - `createHarvestRecord` is a plain insert by design. Unlike
+    `MilkRecord` nothing here is unique per day: a cycle can legitimately
+    be harvested twice — a partial pick, then the rest — so two entries
+    on one date are correct data, not a duplicate to catch.
+  - `getCropCyclesForSelection()` (id, cropType, field name) and
+    `getHarvestHistory()` (recorder as `{ id, name }`, never `include`).
+  - `app/(app)/land/actions.ts` — `createFieldAction`,
+    `createCropCycleAction`, `logHarvestAction`. The two `create*` run
+    `requireOwner()` first, before any parsing and long before any write.
+  - `lib/auth/roles.ts` — `requireOwner()`, split out of `session.ts` so
+    it is pure and directly testable; Shop will want the same gate.
+  - `lib/db/dates.ts` — `farmDate()` moved out of `milk.ts` now that a
+    second module needs it, joined by `parseFarmDate()` (which rejects
+    "2026-02-31" rather than rolling it into March) and
+    `toDateInputValue()`.
+  - `lib/land-config.ts` — harvest bounds plus the fixed unit set, since
+    `HarvestRecord.unit` is a free `String` and `sumHarvestQuantity()`
+    groups by it.
+  - `components/farm/choice-grid.tsx` — the full-width option cells
+    generalised out of `session-toggle.tsx`, now with a module accent.
+    `SessionToggle` is a thin wrapper over it; its API did not change.
+  - `harvest-entry-form.tsx`, `harvest-history-list.tsx`,
+    `field-form.tsx`, `crop-cycle-form.tsx`, and `app/(app)/land/page.tsx`
+    at `/land`: both roles log a harvest, only the owner sees Setup.
+  - A single `/land` link on the home screen for both roles — see open
+    question 15 for why the worker gets one.
+
+### Verification of `05-land-produce.md`
+
+Run against the live Prisma Postgres with a temporary owner and worker,
+all of whose rows were deleted afterwards.
+
+| Check from the spec | Result |
+| --- | --- |
+| A worker can create a `Field` or `CropCycle`? | ✅ No. `requireOwner()` — the actual function both actions call, exercised directly against all six gate states — returns `not-owner` for a ready worker and `not-allowed` for signed-out, needs-unlock, needs-pin-setup, no-record and revoked callers. It runs before `safeParse` and before any query, so nothing is written or read. `not-owner` is its own status, distinct from `invalid` |
+| An owner creates a `Field`, then a `CropCycle` against it, then either role logs a `HarvestRecord` | ✅ walked through the helpers in order; the cycle defaulted to `PLANNED` and both the owner and a worker logged against it |
+| Two harvest entries against the same cycle on the same day both succeed | ✅ three were logged on one date and all three persisted — `count` returned 3, nothing collapsed |
+| The harvest history shows entries from more than one recorder, joined as `{ id, name }` only | ✅ two distinct recorder names in one list; the `recordedBy` object has exactly the keys `id` and `name` |
+| `npm run build` passes | ✅ 9 pages, `/land` compiled |
+| `npm run lint` passes | ✅ exit 0 |
+| Extra — a bad foreign key is typed, not a crash | ✅ a cycle on an unknown field returned `unknown-field`; a harvest on an unknown cycle returned `unknown-cycle` |
+| Extra — no financial column leaks | ✅ no `cost` / `unitPrice` / `totalAmount` on any harvest row, and no `pinHash` on the joined recorder (invariant 6) |
+| Extra — the picker selection is minimal | ✅ exactly `id`, `cropType`, `field` — no dates, no status |
+| Extra — dates | ✅ `parseFarmDate` rejects a non-date and 31 February, and reads a real day as midnight UTC; a cycle's planting and expected-harvest dates read back as the civil days given |
+| Extra — action input validation | ✅ 26 cases across the three schemas: empty names, zero/negative/NaN/over-ceiling acres, impossible and non-dates, an expected harvest before its planting date, an unknown unit, a string quantity, `Infinity`, a `null` body — all rejected; an empty optional note becomes `null` rather than `""`; a client-supplied `recordedById` is stripped |
+
 ## In Progress
 
-`04-milk-entry.md` is built and verified everywhere it can be without a
-Clerk session. Two of its checks are browser work and are **not yet
-done**:
+Both `04-milk-entry.md` and `05-land-produce.md` are built and verified
+everywhere they can be without a Clerk session. What is left in each is
+browser work, and it is **not yet done**:
+
+**Milk**
 
 1. The unique(date, session) constraint exercised **through the real
    UI** — log a session, then log it again, and confirm the screen says
@@ -202,26 +260,43 @@ done**:
    reaching the screen.
 2. The same-day edit and its two refusals walked in the browser.
 
-Also worth watching on that first walkthrough: the entry form and the
-"logged today" list are server-rendered, and the actions call
-`refresh()` to re-render them in the action's own response. If a saved
-entry does not appear in the list without a manual reload, that is the
-thing to look at first.
+**Land**
+
+3. The owner path walked: add a field, open a cycle on it, log a
+   harvest, then log a second one against the same cycle the same day
+   and confirm both appear.
+4. The worker path walked: reach `/land` from the home screen, log a
+   harvest, and confirm the Setup section is absent.
+
+Worth watching on the first walkthrough of either: every form and list
+on both screens is server-rendered, and the actions call `refresh()` to
+re-render them in the action's own response. If a saved entry does not
+appear in its list without a manual reload, that is the thing to look at
+first — it is the one mechanism common to both units that no offline
+test can reach.
 
 ## Next Up
 
-1. Finish the walkthrough above, then Land & Produce and Shop get their
-   own write paths — same shape: `lib/db/` write helpers, an
-   `app/(app)/<module>/actions.ts`, and the screens. Per
+1. Finish the walkthroughs above.
+2. Shop — the third write path. Same shape: `lib/db/` write helpers, an
+   `app/(app)/shop/actions.ts`, and the screens. It is also where
+   invariant 4 (stock never goes negative) first has to hold. Per
    `ai-workflow-rules.md`, Phase 3 (PowerSync offline sync) does not
    start until Phase 1 is complete.
-2. The three-module owner dashboard — the metric card grid and the
+3. **Open question 6 — `Decimal` at the server/client boundary — is now
+   the next real blocker.** It has been deferred out of two units in a
+   row, deliberately and correctly. Whatever comes next has money in it:
+   Shop's `unitPrice` / `totalAmount` / `subtotal`, or Land's
+   `InputRecord.cost` and the cost-vs-yield reporting it feeds. Settle
+   it once, at the start of that unit, before the first screen renders a
+   number.
+4. The three-module owner dashboard — the metric card grid and the
    cross-module "needs attention" list — once all three modules can be
-   written to. Building it against one module would leave two-thirds of
-   it pointing at nothing.
-3. The animal registry, health records and breeding records: the rest
-   of Cows & Milk, deliberately left out of the milk write path because
-   they neither block it nor share it.
+   written to.
+5. The animal registry, health records and breeding records; the
+   `CropCycle` status transition (`PLANNED` → `GROWING` → `HARVESTED`).
+   All deliberately left out of the write paths because they neither
+   block them nor share them.
 
 ## Open Questions
 
@@ -304,6 +379,31 @@ thing to look at first.
    so the entry screen currently says nothing rather than claiming a
    local save it did not make. Add the indicator with the sync layer,
    not before.
+15. **A worker has no assigned module, so they can reach both.**
+   `project-overview.md` says a worker opens straight onto "the entry
+   screen for their assigned module — no dashboard, no module
+   switching". `User` has no assigned-module column, so there is nothing
+   to route on; and `05-land-produce.md` says both roles log harvests,
+   which would be unreachable with no link at all. Both home screens
+   therefore carry a single `/land` link — one link, deliberately not a
+   dashboard. Resolving this properly means a column on `User` (one
+   module, or a set), which is a `prisma/schema.prisma` change and so a
+   reviewed decision, not a feature side effect. Worth settling before
+   Shop adds a third destination.
+16. **The harvest unit set is a guess.** `HarvestRecord.unit` is a free
+   `String` in the schema, but `sumHarvestQuantity()` groups by it, so
+   free text would split one crop's yield across "kg", "Kg" and "kilos"
+   and never add up. `lib/land-config.ts` pins it to kg / bags / crates
+   / bunches. Those four were chosen, not researched — confirm them
+   against how the farm actually measures a harvest, and note that
+   changing the set later does not rewrite rows already stored.
+17. **Two identical crop cycles are indistinguishable in the picker.**
+   `getCropCyclesForSelection()` returns id, cropType and field name —
+   what the spec asked for — so two maize cycles in the same field read
+   the same. It cannot happen yet, because nothing closes a cycle and
+   there is only ever one season's worth. The moment the `PLANNED` →
+   `GROWING` → `HARVESTED` transition lands, the picker needs either the
+   planting year or a filter to open cycles.
 
 ## Architecture Decisions
 
@@ -477,6 +577,58 @@ thing to look at first.
   button width — not target size. One control that renders at two
   heights is a second thing to keep right for no gain, and the owner
   uses the same phone.
+- **A missing foreign key is a result, not an exception** — the same
+  call as milk's duplicate slot. `createCropCycle` and
+  `createHarvestRecord` catch `P2003` and return `unknown-field` /
+  `unknown-cycle`. Caught rather than pre-checked with a read: a
+  read-then-write says nothing about the state at the moment of the
+  insert, and the constraint does. The pickers only ever offer real
+  rows, so this is about a forged POST, not the screen.
+- **A harvest has no uniqueness constraint, and that is the point.**
+  `MilkRecord` is one row per (date, session) by invariant 1; a crop
+  cycle can be harvested twice in a day — a partial pick, then the rest
+  — so `createHarvestRecord` is a plain insert. Two entries on one date
+  are correct data. Getting this wrong in the other direction (copying
+  milk's duplicate check across) would silently lose half a harvest.
+- **`requireOwner()` lives in `lib/auth/roles.ts`, not `session.ts`.**
+  `session.ts` imports Clerk's `auth()` at the top level, so it cannot
+  load outside a request and anything in it can only be tested through a
+  live session. `roles.ts` is pure and imports only a *type* from it, so
+  the owner rule is verified directly against every gate state rather
+  than asserted. This is not the role parameter `code-standards.md`
+  forbids — that rule is about a query helper branching internally; this
+  is the caller resolving its own identity before choosing a path.
+- **The owner check runs before validation, not after.** Both `create*`
+  actions call `requireOwner()` on the resolved gate as their first
+  statement, so a worker's forged POST is refused before its input is
+  parsed and before any row is read or written. `not-owner` is its own
+  status so the message can state the rule rather than complain about a
+  correctly filled field.
+- **`Field` has no owner id to store.** The spec's signature named one,
+  but `Field` is the single model in the schema with no `enteredById` —
+  registry data, not a transactional record. The parameter is absent
+  rather than accepted and dropped, which would read as attribution that
+  is not happening. Open question 15 territory if a field ever needs an
+  author.
+- **`farmDate()` moved to `lib/db/dates.ts` when the second module
+  needed it.** It sat in `milk.ts` while milk was the only date column;
+  copying it into `land.ts` would have been the moment two civil-day
+  definitions started drifting apart. `parseFarmDate()` joined it
+  because `new Date("2026-02-31")` rolls silently into March and
+  `new Date(string)` switches between UTC and local depending on whether
+  a time is present — neither is acceptable at a form boundary.
+- **`ChoiceGrid` was generalised out of `SessionToggle`, not copied.**
+  The harvest unit picker is the same control as the session toggle, so
+  the cells, radios and accent live in one component and
+  `SessionToggle` became a thin wrapper. Its public API is unchanged.
+  The accent is a lookup map rather than an interpolated class name,
+  because Tailwind scans source text and never generates
+  `peer-checked:bg-${accent}`.
+- **A `Select` is right when the option set grows with the farm.**
+  `ui-context.md` prefers full-width cells to a dropdown, and that still
+  holds for units and sessions. A crop cycle picker is unbounded, so it
+  gets a `Select` — sized `h-14` with a 2px edge so it still matches the
+  row it sits in.
 - **The owner's home is one module, not the dashboard.** The spec was
   explicit and it is the right call: a three-module dashboard built now
   would have two cards reading from modules with no write path. The
@@ -524,7 +676,16 @@ thing to look at first.
 - `zod` 4 renamed the error options: it is `z.number({ error: "…" })`
   now, not `invalid_type_error` / `required_error`. `z.enum()` also
   accepts Prisma's generated enum object directly, so the action's
-  schema follows `schema.prisma` instead of restating it.
+  schema follows `schema.prisma` instead of restating it, and it takes a
+  plain `as const` array for a set the schema doesn't define (harvest
+  units). `.refine()` on an object is how a cross-field rule is written
+  — an expected harvest date not preceding its planting date.
+- Anything importing `lib/auth/session.ts` cannot be run under
+  `npx tsx --conditions=react-server`: Clerk's `auth()` pulls in Next's
+  client router context, which fails with
+  `React.createContext is not a function`. That is what forced
+  `requireOwner()` into its own module — and it is the general rule for
+  anything that needs testing outside a request.
 - A Clerk CLI link derived from the **git remote** overrides
   `CLERK_SECRET_KEY` in `.env`, so the CLI can silently operate on a
   different instance than the running app while `clerk doctor` stays

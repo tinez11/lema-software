@@ -23,10 +23,14 @@
 - `components/farm/` — custom composed components shared across
   modules (metric cards, the "needs attention" list, quantity
   steppers, etc.), plus the module-specific screens composed from them.
-  `quantity-stepper.tsx` is the genuinely shared one — a harvest weight
-  and a stock count are the same control — while `session-toggle.tsx`,
-  `milk-entry-form.tsx` and `milk-history-list.tsx` belong to Cows &
-  Milk, the way `pin-pad.tsx` belongs to auth
+  `quantity-stepper.tsx` and `choice-grid.tsx` are the genuinely shared
+  ones — a harvest weight and a stock count are the same control, and a
+  small fixed choice is a row of cells whatever it is choosing between.
+  Everything else is module-specific the way `pin-pad.tsx` belongs to
+  auth: `session-toggle.tsx`, `milk-entry-form.tsx` and
+  `milk-history-list.tsx` to Cows & Milk; `harvest-entry-form.tsx`,
+  `harvest-history-list.tsx`, `field-form.tsx` and `crop-cycle-form.tsx`
+  to Land & Produce
 - `lib/utils.ts` — the `cn()` class-merging helper, re-exported from the
   `cn` package (shadcn's drop-in replacement for `clsx` +
   `tailwind-merge`)
@@ -34,11 +38,19 @@
   functions (`animals.ts`, `milk.ts`, `land.ts`, `shop.ts`), server-only.
   Every file in here starts with `import "server-only"`, so importing one
   from a client component is a build error rather than a runtime leak.
-- `lib/milk-config.ts` — the bounds of a herd-total entry (minimum,
-  ceiling, stepper increment, decimal places) and the rounding both
-  sides apply. Not `server-only`, for the same reason as
-  `pin-config.ts`: the stepper is a client component and must offer
-  exactly the range the server action accepts
+- `lib/milk-config.ts`, `lib/land-config.ts` — per-module entry bounds
+  (minimum, ceiling, stepper increment, decimal places) and the rounding
+  both sides apply; `land-config.ts` also carries the fixed set of
+  harvest units, because `HarvestRecord.unit` is a free `String` in the
+  schema and `sumHarvestQuantity()` groups by it. Neither is
+  `server-only`, for the same reason as `pin-config.ts`: the entry
+  controls are client components and must offer exactly the range the
+  server action accepts
+- `lib/db/dates.ts` — `farmDate()`, `parseFarmDate()` and
+  `toDateInputValue()`, the only conversions between a clock instant, a
+  `YYYY-MM-DD` form value, and the `@db.Date` civil day a record is
+  filed under. Shared by every module with a date column rather than
+  reimplemented per module
 - `lib/sync/` — PowerSync client setup and sync rule configuration
 - `lib/auth/` — Clerk configuration and the PIN-unlock layer that
   switches between already-authenticated worker profiles on a shared
@@ -53,6 +65,11 @@
     ready
   - `actions.ts` — the three server actions of the PIN flow, each
     re-reading the caller's identity from Clerk rather than a client prop
+  - `roles.ts` — `requireOwner()`, which narrows a resolved gate to a
+    signed-in, unlocked owner. Kept out of `session.ts` because that
+    module imports Clerk's `auth()` at the top level and so cannot load
+    outside a request; `roles.ts` is pure, which is what makes the rule
+    testable directly instead of only through a live session
 - `proxy.ts` — `clerkMiddleware` at the project root. Next 16 renamed
   `middleware.ts` to `proxy.ts`; everything is protected except
   `/sign-in`, `/signed-out`, `/__clerk/*` and the Clerk webhook
@@ -65,13 +82,13 @@
   apply the gate again. `app/(app)/page.tsx` routes on role: a worker
   lands on the milk entry screen itself, an owner on the Cows & Milk
   module home
-- `app/(app)/milk/actions.ts` — the module's server actions. A module's
-  writes live in an `actions.ts` beside its route rather than in
-  `lib/db/`, because this is where the caller's identity is resolved
-  (from Clerk, never from a prop) and its input validated with `zod`
-  before a query helper is reached. The folder holds no `page.tsx`: the
-  screens are reached through `/`, not `/milk`, until there is more than
-  one module to switch between
+- `app/(app)/milk/actions.ts`, `app/(app)/land/` — each module's server
+  actions. A module's writes live in an `actions.ts` beside its route
+  rather than in `lib/db/`, because this is where the caller's identity
+  is resolved (from Clerk, never from a prop) and its input validated
+  with `zod` before a query helper is reached. `milk/` holds no
+  `page.tsx` — its screens are reached through `/`, which is still where
+  both roles land; `land/` has one at `/land`
 - `app/lock/`, `app/set-pin/` — outside that group on purpose: a locked
   worker has to be able to reach the screen the group redirected them to
 - `app/api/webhooks/clerk/` — creates the Prisma `User` row on
@@ -103,10 +120,17 @@
   the identity of a record. Prisma reads one back as midnight UTC, so
   every date written has to be built the same way or "today" never
   compares equal to a stored date and the constraint guards the wrong
-  thing. `farmDate()` in `lib/db/milk.ts` is that one conversion, and
-  every screen formats those dates back with `timeZone: "UTC"`. Which
-  civil day it is still comes from the *server's* clock — see open
-  question 12.
+  thing. `farmDate()` in `lib/db/dates.ts` is that one conversion,
+  shared by every module with a date column — `CropCycle`,
+  `HarvestRecord` and `InputRecord` all have one — and every screen
+  formats those dates back with `timeZone: "UTC"`. Which civil day it is
+  still comes from the *server's* clock — see open question 12.
+- **Registry data carries no attribution; transactional data does.**
+  Every record entered in the course of a day has an `enteredById` /
+  `recordedById`. `Field` is the one model in the schema without one —
+  it is reference data the owner sets up, not something logged — so
+  `createField()` has no owner id to store. Owner-only creation is
+  still enforced, in the action, by `requireOwner()`.
 
 ## Auth and Access Model
 

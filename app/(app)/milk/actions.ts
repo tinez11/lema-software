@@ -5,11 +5,8 @@ import { refresh } from "next/cache"
 import { z } from "zod"
 
 import { resolveAuthGate } from "@/lib/auth/session"
-import {
-  createMilkRecord,
-  farmDate,
-  updateMilkRecord,
-} from "@/lib/db/milk"
+import { farmDate } from "@/lib/db/dates"
+import { createMilkRecord, updateMilkRecord } from "@/lib/db/milk"
 import { getUserById } from "@/lib/db/users"
 import {
   MAX_MILK_LITERS,

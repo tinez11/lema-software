@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client"
 import type { MilkRecord, MilkSession } from "@prisma/client"
 
 import { prisma } from "./client"
+import { farmDate } from "./dates"
 
 // Herd-total milk production. One record per date and session, guaranteed by
 // the `@@unique([date, session])` constraint on `MilkRecord` — never per
@@ -11,23 +12,6 @@ import { prisma } from "./client"
 //
 // `MilkRecord` carries no financial columns, so there is one path per query
 // here: no `...WithFinancials()` variant exists or is needed.
-
-// ───────────── Dates ─────────────
-
-/**
- * The value `@db.Date` stores for the civil day `at` falls on: midnight UTC,
- * with the time of day discarded.
- *
- * A Postgres `date` has no time and no zone, and Prisma reads one back as
- * midnight UTC — so every date written here has to be built the same way, or
- * "today" and a stored date never compare equal and the uniqueness constraint
- * ends up guarding the wrong thing. The civil day comes from the *server's*
- * timezone; see open question 12 in `progress-tracker.md` about pinning that
- * to the farm's own timezone before this runs anywhere but a local machine.
- */
-export function farmDate(at: Date = new Date()): Date {
-  return new Date(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()))
-}
 
 // ───────────── Reads ─────────────
 

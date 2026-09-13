@@ -1,5 +1,6 @@
+import Link from "next/link"
 import { UserButton } from "@clerk/nextjs"
-import { MilkIcon } from "lucide-react"
+import { ChevronRightIcon, MilkIcon, SproutIcon } from "lucide-react"
 import type { MilkSession } from "@prisma/client"
 
 import { MilkEntryForm } from "@/components/farm/milk-entry-form"
@@ -8,11 +9,9 @@ import type { MilkHistoryEntry } from "@/components/farm/milk-history-list"
 import { WorkerPinList } from "@/components/farm/worker-pin-list"
 import type { CurrentUser } from "@/lib/auth/session"
 import { resolveAuthGate } from "@/lib/auth/session"
-import {
-  farmDate,
-  getMilkRecordsForDate,
-  getRecentMilkRecords,
-} from "@/lib/db/milk"
+import { cn } from "@/lib/utils"
+import { farmDate } from "@/lib/db/dates"
+import { getMilkRecordsForDate, getRecentMilkRecords } from "@/lib/db/milk"
 import type { MilkRecordWithRecorder } from "@/lib/db/milk"
 
 // Home routes on role, and for now both roles land in Cows & Milk — it is the
@@ -47,6 +46,37 @@ const shortDayFormat = new Intl.DateTimeFormat("en-GB", {
 /** Morning until mid-afternoon, evening after — the entry most likely next. */
 function sessionForNow(at: Date = new Date()): MilkSession {
   return at.getHours() < 14 ? "MORNING" : "EVENING"
+}
+
+/**
+ * The way to the other module with a write path.
+ *
+ * `project-overview.md` says a worker opens straight onto "their assigned
+ * module" with no module switching — but `User` has no assigned-module column,
+ * so there is nothing to route on, and without a link a worker could not reach
+ * the harvest screen at all. Until that column exists, every worker can reach
+ * both. Deliberately one link rather than a dashboard. See open question 15.
+ */
+function LandLink({ treatment }: { treatment: "owner" | "worker" }) {
+  const worker = treatment === "worker"
+
+  return (
+    <Link
+      href="/land"
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-xl bg-card transition-colors hover:border-gold",
+        worker ? "border-2 border-border p-5" : "border border-border p-4 shadow-sm"
+      )}
+    >
+      <span className="flex items-center gap-3">
+        <SproutIcon className="h-5 w-5 text-gold" aria-hidden />
+        <span className={cn("font-semibold", worker ? "text-lg" : "text-base")}>
+          Land &amp; Produce
+        </span>
+      </span>
+      <ChevronRightIcon className="h-5 w-5 text-muted-foreground" aria-hidden />
+    </Link>
+  )
 }
 
 function toHistoryEntry(
@@ -111,6 +141,8 @@ async function WorkerMilkEntry({ user }: { user: CurrentUser }) {
             emptyMessage="Nothing logged yet today."
           />
         </section>
+
+        <LandLink treatment="worker" />
       </main>
     </div>
   )
@@ -168,6 +200,8 @@ async function OwnerMilkHome({ user }: { user: CurrentUser }) {
             emptyMessage="No milk has been logged yet."
           />
         </section>
+
+        <LandLink treatment="owner" />
 
         {/* Kept from the auth unit: a forgotten PIN has no other way out, and
             this is still the owner's only screen. */}
