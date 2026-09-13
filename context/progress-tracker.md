@@ -83,7 +83,7 @@ exercising early.
 - **`03-auth.md` — Clerk, the webhook, and the worker PIN layer** ✅
   - `@clerk/nextjs` 7.9.2 installed; `ClerkProvider` inside `<body>`,
     `proxy.ts` running `clerkMiddleware` with everything protected except
-    `/sign-in`, `/sign-up`, `/__clerk/*` and the webhook.
+    `/sign-in`, `/signed-out`, `/__clerk/*` and the webhook.
   - Schema: `User.pinHash`, `pinSetAt`, `pinFailedAttempts`,
     `pinLockedUntil`; migration `20260913172128_add_worker_pin_fields`.
   - `lib/auth/`: `pin-config.ts` (shared constants), `pin.ts` (scrypt),
@@ -176,14 +176,19 @@ complete and verified.
    the schema is unchanged from `context/schema.prisma`, but Prisma's
    newer `prisma-client` generator writes to an explicit `output` path
    instead of `node_modules`. Switch deliberately, not during a feature.
-8. **The Clerk CLI and the app keys point at different instances.**
-   `clerk doctor` is green, but it only checks that keys exist. The CLI
-   is logged into a different Clerk account and linked to a different
-   application than the one whose keys are in `.env`, so
-   `clerk users list`, `clerk webhooks listen` and friends act on a
-   different instance than the running app. Point one at the other
-   before leaning on the CLI for worker management. The app ID written
-   into `03-auth.md` 404s for the CLI login and was never used.
+8. ~~**The Clerk CLI and the app keys point at different instances.**~~
+   Resolved by `clerk unlink`. The CLI had auto-linked this directory to
+   an application via the **git remote**, and that link silently took
+   precedence over `CLERK_SECRET_KEY` in `.env` — `clerk whoami` showed
+   `localSecretKeySource: null` while linked, and `.env` the moment it
+   was unlinked. `clerk users list` now returns the app's real users.
+   `clerk doctor` reports "Not linked — using the accountless
+   application", which is the correct state here: linking would need the
+   Clerk account that owns the app to be logged in, and the app ID
+   written into `03-auth.md` 404s for the account the CLI is signed into.
+   The trade-off is that unlinked mode "covers fewer settings" —
+   account-level configuration is not reachable, but everything
+   instance-scoped (users, webhooks) is.
 9. **Re-lock threshold on foreground.** The spec says "opened or
    foregrounded". Opening is covered by the session cookie. For
    foregrounding, `relock-on-foreground.tsx` ignores hides shorter than
@@ -357,3 +362,8 @@ complete and verified.
 - To deliver Clerk webhooks to localhost: `clerk webhooks listen
   --forward-to http://localhost:3000/api/webhooks/clerk`, then put the
   signing secret it prints into `CLERK_WEBHOOK_SIGNING_SECRET`.
+- A Clerk CLI link derived from the **git remote** overrides
+  `CLERK_SECRET_KEY` in `.env`, so the CLI can silently operate on a
+  different instance than the running app while `clerk doctor` stays
+  green. `clerk whoami` is the tell: `localSecretKeySource: null` means
+  a link is winning. `clerk unlink` hands control back to `.env`.
