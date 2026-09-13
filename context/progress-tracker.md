@@ -2,13 +2,14 @@
 
 ## Current Phase
 
-Phase 0 — Foundation. The design system and UI primitives are in place;
-next comes data (Prisma schema + `lib/db/`) and auth.
+Phase 0 — Foundation. The design system, UI primitives, and the central
+data layer (Prisma schema + `lib/db/`) are in place; auth is the last
+piece before Phase 1.
 
 ## Current Goal
 
-Close out Phase 0 and move to Phase 1 — core data entry for a single
-module, end to end.
+Close out Phase 0 with Clerk auth and the PIN-unlock layer, then move to
+Phase 1 — core data entry for a single module, end to end.
 
 ## Completed
 
@@ -42,19 +43,50 @@ module, end to end.
 | `npm run build` passes | ✅ compiled in 4.0s, 4 static pages |
 | `npm run lint` passes | ✅ exit 0 |
 
+- **`02-database` — Prisma schema, client, and query helpers** ✅
+  - `prisma/schema.prisma` copied from `context/schema.prisma`; models,
+    fields, enums, and constraints are unchanged. The one forced edit is
+    the datasource block — see the Prisma 7 decisions below.
+  - `prisma.config.ts` supplies `DATABASE_URL` (via `dotenv`) to migrate
+    and introspect; `.env` holds the value and stays gitignored, with
+    `.env.example` committed as the template.
+  - Initial migration `prisma/migrations/20260913161613_init` created and
+    applied against the Prisma Postgres instance — all 14 tables live.
+  - `lib/db/client.ts` — the shared `PrismaClient`, built on the
+    `@prisma/adapter-pg` driver adapter and cached on `globalThis` so hot
+    reload cannot open a new pool per edit.
+  - `lib/db/animals.ts`, `milk.ts`, `land.ts`, `shop.ts` — thin read
+    helpers per module, no business logic, no API routes or server
+    actions yet (deliberately out of this unit's scope).
+  - `server-only` installed; every `lib/db/*` module imports it.
+  - `postinstall: prisma generate` added so a fresh clone has a client.
+
+### Verification of `02-database`
+
+| Check from the spec | Result |
+| --- | --- |
+| `npx prisma validate` passes | ✅ "The schema at prisma\schema.prisma is valid" |
+| `npx prisma migrate dev` runs clean | ✅ applied `20260913161613_init`; `information_schema` lists all 14 tables |
+| `lib/db/client.ts` exports a single shared client | ✅ the module was re-imported three times under `--conditions=react-server` (what hot reload does); all three exports were the same object, `globalThis.prismaClient` was the only cache key, and `SELECT 1` returned through it |
+| `npm run build` passes | ✅ compiled in 23.6s, 4 static pages |
+| `npm run lint` passes | ✅ exit 0 |
+| Extra — invariant 1 holds in the database | ✅ `MilkRecord_date_session_key` exists; a second insert for the same date/session was rejected with `P2002`. Run inside a transaction that was rolled back, so no rows were left behind |
+| Extra — helpers run against the live schema | ✅ every exported helper in all four modules executed against Postgres (empty results, no errors) |
+
 ## In Progress
 
-Nothing — `01-design-system.md` is complete.
+Nothing — `01-design-system.md` and `02-database` are complete.
 
 ## Next Up
 
-1. `prisma/schema.prisma` + `lib/db/` Prisma client (server-only).
-2. Clerk auth and the PIN-unlock layer in `lib/auth/` — the `input-otp`
-   primitive is already in place for the PIN entry UI.
-3. Phase 1 — core data entry for one module end to end. Per
-   `ai-workflow-rules.md`, Phase 3 (PowerSync offline sync) does not
-   start until Phase 1 is complete.
-4. `components/farm/` composed components (metric cards, the "needs
+1. Clerk auth and the PIN-unlock layer in `lib/auth/` — the `input-otp`
+   primitive is already in place for the PIN entry UI. `User.id` is the
+   Clerk user id, so the two meet there.
+2. Phase 1 — core data entry for one module end to end. This is where
+   the write path lands: server actions plus the `lib/db/` write helpers
+   they call. Per `ai-workflow-rules.md`, Phase 3 (PowerSync offline
+   sync) does not start until Phase 1 is complete.
+3. `components/farm/` composed components (metric cards, the "needs
    attention" list, quantity steppers) once there is real data to show.
 
 ## Open Questions
@@ -75,6 +107,26 @@ Nothing — `01-design-system.md` is complete.
 4. **Sidebar tokens.** `--sidebar-*` variables are mapped to the
    palette for completeness, but no layout in `ui-context.md` uses a
    sidebar. Drop them if a sidebar never materialises.
+5. **Where the worker cost/price filter lives.** Invariant 2 says workers
+   never receive cost, price, or profit. `lib/db/` helpers currently
+   return whole rows, cost columns included; they are server-only, so
+   nothing leaks yet. Decide before Phase 1 whether the filter belongs in
+   a DTO layer above `lib/db/`, or in role-aware `select` clauses inside
+   the helpers themselves. `architecture.md` says "the query/response
+   layer" without picking one.
+6. **`Decimal` across the server/client boundary.** Cost, price, and
+   `totalAmount` come back as Prisma `Decimal` objects, which are not
+   serialisable into a client component. Settle on one conversion
+   (string at the DTO boundary, most likely) before the first screen
+   renders money.
+7. **`prisma-client-js` is deprecated.** It still generates in 7.10.0 and
+   the schema is unchanged from `context/schema.prisma`, but Prisma's
+   newer `prisma-client` generator writes to an explicit `output` path
+   instead of `node_modules`. Switch deliberately, not during a feature.
+8. **Production migration path.** `prisma migrate dev` is a development
+   command and was used here against the shared Prisma Postgres
+   instance. Deploys should run `prisma migrate deploy`; decide where
+   that runs (CI step vs. release script) before anything is deployed.
 
 ## Architecture Decisions
 
@@ -111,6 +163,36 @@ Nothing — `01-design-system.md` is complete.
   set on `:root`, and `<Toaster theme="light" />` overrides the
   generated Toaster's next-themes `system` default.
 
+- **Prisma pinned to 7.10.0, not the 8.0.0-rc CLI.** `prisma` and
+  `@prisma/client` must match, and npm's `latest` tag for the `prisma`
+  CLI is currently `8.0.0-rc.14` while `@prisma/client` stops at
+  `7.10.0` — so a plain `npm i -D prisma` had left the repo with a v8 CLI
+  driving a v7 client. Prisma 8 is a different product surface
+  (`contract.prisma`, `prisma db migrate`, Composer modules) with no
+  `validate` or `migrate dev`, and it contradicts both `architecture.md`
+  and the `02-database` spec. The CLI is now pinned to the stable 7.10.0
+  that matches the client.
+- **The datasource block lost its `url`.** Prisma 7 rejects
+  `url = env("DATABASE_URL")` in a schema file outright (P1012). The URL
+  lives in `prisma.config.ts` for the CLI and reaches the runtime client
+  through the driver adapter. This is the only change made to the
+  canonical schema, and `context/schema.prisma` carries the same edit so
+  the two stay byte-identical.
+- **Postgres is reached through `@prisma/adapter-pg`.** Prisma 7 has no
+  built-in connection layer; a driver adapter is how the client connects.
+  `pg` and `@types/pg` exist for that reason, not as a second data path.
+- **The client is cached on `globalThis` in development only.** Hot
+  reload re-evaluates modules, and a fresh `PrismaClient` per reload
+  would leak connection pools. Production evaluates once, so the cache is
+  skipped there. Verified rather than assumed — see the table above.
+- **`lib/db/` is read-only for now.** The spec scoped this unit to schema
+  + client + query helpers, so no writes, no server actions, no API
+  routes. Write helpers arrive in Phase 1 next to the server actions that
+  call them, where the role check and validation live.
+- **`server-only` is installed even though Next.js handles the import
+  internally.** The Next 16 data-security guide recommends installing it
+  so lint rules don't flag an extraneous dependency.
+
 ## Session Notes
 
 - Next.js here is 16.x — conventions differ from older App Router
@@ -124,3 +206,12 @@ Nothing — `01-design-system.md` is complete.
   `app/globals.css`, which is what makes it win over the
   self-referential `--font-sans: var(--font-sans)` Tailwind emits into
   `@layer theme`. Don't move that block inside a layer.
+- Prisma 7 does not read `.env` on its own — hence the `dotenv` import at
+  the top of `prisma.config.ts`. Next.js still loads `.env` for the app
+  itself, so the runtime client needs nothing extra.
+- `prisma skills sync` (from the v8 CLI) scatters agent instruction files
+  into `.claude/`, `.cursor/`, `.agents/` and `.devin/`. They describe
+  Prisma 8 and were removed; don't run it while the project is on 7.x.
+- Verifying a server-only module outside Next.js needs
+  `npx tsx --conditions=react-server`, otherwise `import "server-only"`
+  throws by design.
