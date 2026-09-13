@@ -1,0 +1,315 @@
+// ─────────────────────────────────────────────────────────────
+// Farm Management App — Prisma Schema (central server database)
+//
+// This schema lives on the server (Postgres). Devices keep their
+// own local store (SQLite/IndexedDB) shaped like these models and
+// sync up when online. Fields marked "sync" below exist to make
+// that reconciliation possible — not for everyday app logic.
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────── Shared sync fields (repeated per model) ─────────────
+// id           — server-assigned primary key (cuid)
+// clientId     — id the device generated while offline, before it had
+//                a server id. Lets the sync layer recognize "this record
+//                already exists" instead of creating a duplicate.
+// enteredById  — which user (owner or worker) created this record
+// createdAt / updatedAt — updatedAt drives last-write-wins conflict
+//                resolution when two devices edit the same record
+// deviceId     — which device the entry originated from, useful for
+//                debugging sync issues, not shown in normal UI
+
+// ───────────── Users & Auth ─────────────
+
+enum Role {
+  OWNER
+  WORKER
+}
+
+model User {
+  id        String   @id // matches the Clerk user id directly
+  role      Role
+  name      String
+  active    Boolean  @default(true) // set false to revoke a worker's access
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  animalsEntered    Animal[]
+  milkRecords       MilkRecord[]
+  healthRecords     HealthRecord[]
+  breedingRecords   BreedingRecord[]
+  feedRecords       FeedRecord[]
+  cropCycles        CropCycle[]
+  inputRecords      InputRecord[]
+  harvestRecords    HarvestRecord[]
+  stockAdjustments  StockAdjustment[]
+  sales             Sale[]
+}
+
+// ───────────── Module 1: Cows & Milk ─────────────
+
+enum AnimalStatus {
+  ACTIVE
+  SOLD
+  DECEASED
+}
+
+enum Sex {
+  MALE
+  FEMALE
+}
+
+model Animal {
+  id           String       @id @default(cuid())
+  clientId     String?      @unique
+  tagNumber    String       @unique
+  name         String?
+  breed        String?
+  dateOfBirth  DateTime?
+  sex          Sex
+  status       AnimalStatus @default(ACTIVE)
+  photoUrl     String?
+  deviceId     String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  enteredBy    User             @relation(fields: [enteredById], references: [id])
+  enteredById  String
+  healthRecords    HealthRecord[]
+  breedingRecords  BreedingRecord[]
+  bornFrom         BreedingRecord[] @relation("CalfOf")
+
+  @@index([status])
+}
+
+enum MilkSession {
+  MORNING
+  EVENING
+}
+
+model MilkRecord {
+  id          String      @id @default(cuid())
+  clientId    String?     @unique
+  date        DateTime    @db.Date
+  session     MilkSession
+  liters      Float
+  deviceId    String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+  recordedById String
+
+  // Prevents two duplicate herd-total entries for the same day/session.
+  // If two devices sync a conflicting entry for the same slot, the app's
+  // sync logic should flag it for review rather than silently overwrite.
+  @@unique([date, session])
+}
+
+enum HealthEventType {
+  VACCINATION
+  ILLNESS
+  TREATMENT
+}
+
+model HealthRecord {
+  id        String          @id @default(cuid())
+  clientId  String?         @unique
+  animalId  String
+  date      DateTime        @db.Date
+  type      HealthEventType
+  notes     String?
+  cost      Decimal?        @db.Decimal(10, 2)
+  vetName   String?
+  deviceId  String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  animal       Animal @relation(fields: [animalId], references: [id])
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+  recordedById String
+}
+
+model BreedingRecord {
+  id                  String    @id @default(cuid())
+  clientId            String?   @unique
+  animalId            String
+  matingDate          DateTime  @db.Date
+  expectedCalvingDate DateTime? @db.Date
+  actualCalvingDate   DateTime? @db.Date
+  calfAnimalId        String?
+  deviceId            String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  animal       Animal  @relation(fields: [animalId], references: [id])
+  calf         Animal? @relation("CalfOf", fields: [calfAnimalId], references: [id])
+  recordedBy   User    @relation(fields: [recordedById], references: [id])
+  recordedById String
+}
+
+model FeedRecord {
+  id        String   @id @default(cuid())
+  clientId  String?  @unique
+  date      DateTime @db.Date
+  feedType  String
+  quantity  Float
+  cost      Decimal  @db.Decimal(10, 2)
+  deviceId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  recordedBy   User   @relation(fields: [recordedById], references: [id])
+  recordedById String
+}
+
+// ───────────── Module 2: Land & Produce ─────────────
+
+model Field {
+  id           String  @id @default(cuid())
+  name         String
+  sizeAcres    Float?
+  locationNote String?
+  soilType     String?
+
+  cropCycles CropCycle[]
+}
+
+enum CropCycleStatus {
+  PLANNED
+  GROWING
+  HARVESTED
+}
+
+model CropCycle {
+  id                  String          @id @default(cuid())
+  clientId            String?         @unique
+  fieldId             String
+  cropType            String
+  plantingDate        DateTime        @db.Date
+  expectedHarvestDate DateTime?       @db.Date
+  actualHarvestDate   DateTime?       @db.Date
+  status              CropCycleStatus @default(PLANNED)
+  deviceId            String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  field          Field           @relation(fields: [fieldId], references: [id])
+  enteredBy      User            @relation(fields: [enteredById], references: [id])
+  enteredById    String
+  inputRecords   InputRecord[]
+  harvestRecords HarvestRecord[]
+}
+
+enum InputType {
+  SEED
+  FERTILIZER
+  PESTICIDE
+  LABOR
+}
+
+model InputRecord {
+  id          String    @id @default(cuid())
+  clientId    String?   @unique
+  cropCycleId String
+  date        DateTime  @db.Date
+  type        InputType
+  quantity    Float?
+  cost        Decimal   @db.Decimal(10, 2)
+  deviceId    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  cropCycle    CropCycle @relation(fields: [cropCycleId], references: [id])
+  recordedBy   User      @relation(fields: [recordedById], references: [id])
+  recordedById String
+}
+
+model HarvestRecord {
+  id           String   @id @default(cuid())
+  clientId     String?  @unique
+  cropCycleId  String
+  date         DateTime @db.Date
+  quantity     Float
+  unit         String
+  qualityGrade String?
+  deviceId     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cropCycle    CropCycle @relation(fields: [cropCycleId], references: [id])
+  recordedBy   User      @relation(fields: [recordedById], references: [id])
+  recordedById String
+}
+
+// ───────────── Module 3: Shop (standalone retail) ─────────────
+
+model StockItem {
+  id                String   @id @default(cuid())
+  name              String
+  category           String?
+  unit              String
+  quantity          Float    @default(0)
+  unitPrice         Decimal  @db.Decimal(10, 2)
+  lowStockThreshold Float?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  adjustments StockAdjustment[]
+  saleItems   SaleItem[]
+}
+
+enum StockAdjustmentType {
+  RESTOCK
+  SALE_DEDUCTION
+  WASTAGE
+}
+
+model StockAdjustment {
+  id          String              @id @default(cuid())
+  clientId    String?             @unique
+  stockItemId String
+  date        DateTime            @default(now())
+  type        StockAdjustmentType
+  quantity    Float
+  note        String?
+  deviceId    String?
+  createdAt   DateTime            @default(now())
+
+  stockItem    StockItem @relation(fields: [stockItemId], references: [id])
+  recordedBy   User      @relation(fields: [recordedById], references: [id])
+  recordedById String
+}
+
+model Sale {
+  id            String        @id @default(cuid())
+  clientId      String?       @unique
+  date          DateTime      @default(now())
+  totalAmount   Decimal       @db.Decimal(10, 2)
+  deviceId      String?
+  createdAt     DateTime      @default(now())
+
+  recordedBy     User            @relation(fields: [recordedById], references: [id])
+  recordedById   String
+  items          SaleItem[]
+}
+
+model SaleItem {
+  id          String  @id @default(cuid())
+  saleId      String
+  stockItemId String
+  quantity    Float
+  unitPrice   Decimal @db.Decimal(10, 2)
+  subtotal    Decimal @db.Decimal(10, 2)
+
+  sale      Sale      @relation(fields: [saleId], references: [id])
+  stockItem StockItem @relation(fields: [stockItemId], references: [id])
+}

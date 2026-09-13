@@ -1,1 +1,164 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+ * Light-only theme — see context/ui-context.md.
+ *
+ * The generated shadcn primitives in components/ui/ carry `dark:` utilities
+ * that must never fire. Keeping this custom variant scoped to a `.dark`
+ * ancestor (a class this app never renders) neutralises them. Deleting the
+ * variant would be worse than useless: Tailwind would fall back to its
+ * default `prefers-color-scheme: dark` behaviour, which code-standards.md
+ * forbids branching on.
+ */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: var(--font-sans);
+    --font-mono: var(--font-mono);
+
+    /*
+     * Module accents. Each business line keeps its own colour across the
+     * dashboard, its module screens, and the cross-module "needs attention"
+     * list, so the colour itself signals which module a record belongs to.
+     * Exposed as utilities: bg-moss, text-gold, border-ochre, ring-rust, ...
+     */
+    --color-moss: var(--accent-moss);
+    --color-moss-foreground: var(--bg-surface);
+    --color-gold: var(--accent-gold);
+    --color-gold-foreground: var(--bg-surface);
+    --color-ochre: var(--accent-ochre);
+    --color-ochre-foreground: var(--bg-surface);
+    --color-rust: var(--accent-rust);
+    --color-rust-foreground: var(--bg-surface);
+
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+
+    /*
+     * Radius scale, pinned to the steps in ui-context.md:
+     *   lg  → 12px  small UI controls (buttons, inputs, popovers, tabs)
+     *   xl  → 16px  cards, dialogs, panels, primary action buttons
+     *   2xl → 20px  upper bound for panels
+     *   4xl → full  pills, badges, tags
+     */
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: 16px;
+    --radius-2xl: 20px;
+    --radius-3xl: 24px;
+    --radius-4xl: 9999px;
+}
+
+:root {
+    /* Never adopt the OS dark preference — light-only, including native
+       controls, scrollbars and form widgets. */
+    color-scheme: light;
+
+    /* Palette — context/ui-context.md. These are the only raw colour
+       values in the project; everything below is expressed in terms of
+       them, and components reference the semantic tokens, never a hex. */
+    --bg-base: #eff0e6;
+    --bg-surface: #fbfaf3;
+    --text-primary: #262919;
+    --text-muted: #6b6c5e;
+    --border-default: #dedbc9;
+    --accent-moss: #2e7d32;
+    --accent-gold: #96692a;
+    --accent-ochre: #8c6a22;
+    --accent-rust: #9b4a34;
+
+    --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+        "Liberation Mono", monospace;
+
+    --radius: 12px;
+
+    /* shadcn semantic tokens, remapped onto the palette above so the
+       generated primitives inherit the theme without being edited. */
+    --background: var(--bg-base);
+    --foreground: var(--text-primary);
+    --card: var(--bg-surface);
+    --card-foreground: var(--text-primary);
+    --popover: var(--bg-surface);
+    --popover-foreground: var(--text-primary);
+
+    /* No single brand colour by design — the deep olive-charcoal of the
+       text scale carries the neutral primary, leaving the three accents
+       to mean "which module". */
+    --primary: var(--text-primary);
+    --primary-foreground: var(--bg-surface);
+
+    /* One subtle warm fill for secondary surfaces, hover and highlight
+       states — it reads against both the page base and card surfaces. */
+    --secondary: var(--border-default);
+    --secondary-foreground: var(--text-primary);
+    --muted: var(--border-default);
+    --muted-foreground: var(--text-muted);
+    --accent: var(--border-default);
+    --accent-foreground: var(--text-primary);
+
+    --destructive: var(--accent-rust);
+    --border: var(--border-default);
+    --input: var(--border-default);
+    --ring: var(--text-muted);
+
+    --chart-1: var(--accent-moss);
+    --chart-2: var(--accent-gold);
+    --chart-3: var(--accent-ochre);
+    --chart-4: var(--accent-rust);
+    --chart-5: var(--text-muted);
+
+    --sidebar: var(--bg-surface);
+    --sidebar-foreground: var(--text-primary);
+    --sidebar-primary: var(--text-primary);
+    --sidebar-primary-foreground: var(--bg-surface);
+    --sidebar-accent: var(--border-default);
+    --sidebar-accent-foreground: var(--text-primary);
+    --sidebar-border: var(--border-default);
+    --sidebar-ring: var(--text-muted);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
