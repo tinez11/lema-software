@@ -44,6 +44,16 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ── Worker PIN unlock ──
+  // The PIN is a fast identity switch on a shared device, layered on top of
+  // an existing Clerk session — never a replacement for it. The hash lives
+  // here, on the server, and is never synced to a device or sent to the
+  // client: comparison happens server-side in `lib/auth/pin.ts`.
+  pinHash           String? // scrypt: salt:derivedKey, both hex
+  pinSetAt          DateTime?
+  pinFailedAttempts Int       @default(0) // consecutive failures; reset on success
+  pinLockedUntil    DateTime? // set after 5 failures; entry refused until it passes
+
   animalsEntered    Animal[]
   milkRecords       MilkRecord[]
   healthRecords     HealthRecord[]

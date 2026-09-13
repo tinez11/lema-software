@@ -33,7 +33,26 @@
 - `lib/sync/` — PowerSync client setup and sync rule configuration
 - `lib/auth/` — Clerk configuration and the PIN-unlock layer that
   switches between already-authenticated worker profiles on a shared
-  device
+  device:
+  - `pin-config.ts` — PIN length, attempt limit, lockout seconds, and
+    format check. The only file here without `server-only`, because the
+    lock screen is a client component and must enforce the same numbers
+  - `pin.ts` — scrypt hashing and constant-time comparison, server-only
+  - `unlock.ts` — the signed, session-scoped unlock cookie
+  - `session.ts` — `resolveAuthGate()`, which turns a request into one of
+    signed-out / no-record / revoked / needs-pin-setup / needs-unlock /
+    ready
+  - `actions.ts` — the three server actions of the PIN flow, each
+    re-reading the caller's identity from Clerk rather than a client prop
+- `proxy.ts` — `clerkMiddleware` at the project root. Next 16 renamed
+  `middleware.ts` to `proxy.ts`; everything is protected except
+  `/sign-in`, `/sign-up`, `/__clerk/*` and the Clerk webhook
+- `app/(app)/` — the route group holding every real app screen. Its
+  layout applies the auth gate once, so no page has to remember to
+- `app/lock/`, `app/set-pin/` — outside that group on purpose: a locked
+  worker has to be able to reach the screen the group redirected them to
+- `app/api/webhooks/clerk/` — creates the Prisma `User` row on
+  `user.created`, authenticated by Svix signature rather than a session
 - `prisma/schema.prisma` — the single central schema (see the
   accompanying `schema.prisma` file)
 - `prisma/migrations/` — generated migration history; applied with
@@ -72,6 +91,28 @@
   any device that hasn't reconnected since the revocation will still
   accept that worker's old PIN until it next syncs — a known,
   accepted gap given the offline-first design.
+- **The PIN check is central, not on-device.** The original plan was to
+  sync `pinHash` down and compare it on the device via PowerSync. That
+  was dropped: shipping a hash of a 4-digit secret to every shared
+  device makes it brute-forceable offline, and a locally held attempt
+  counter is reset by clearing app data. Keeping the hash in Postgres
+  costs a network round-trip to unlock, so a worker who is fully offline
+  and has not unlocked yet this session sees an explicit offline message
+  rather than a silent failure. Work already entered is unaffected — it
+  is queued locally and syncs later.
+- **A forgotten PIN is reset by the owner, never by the worker.** Anyone
+  sitting at a locked screen already holds a cached Clerk session on
+  that device — precisely the case the PIN exists to stop — so a
+  self-serve reset would hand the app to whoever picked the phone up.
+  The owner clears it from their home screen
+  (`resetWorkerPinAction`, owner-only, server-checked), which also
+  clears any lockout; the worker then chooses a new PIN on their next
+  open. This matches how invites and revocation already work.
+- The unlock itself is a signed, `httpOnly` session cookie naming the
+  user it was issued for. It has no `maxAge`, so closing the app clears
+  it; foregrounding clears it explicitly from the client. It carries no
+  authority of its own — Clerk's session is still what authenticates
+  every request.
 
 ## Invariants
 
@@ -98,3 +139,12 @@
    handlers or server actions). The client never talks to Postgres
    directly — on-device writes go through the local SQLite/PowerSync
    layer first and sync up afterward.
+6. `User.pinHash` never leaves the server and is never synced to a
+   device. Only `verifyPinHash()` in `lib/db/users.ts` reads the column,
+   and it returns a verdict rather than the hash; every other read of
+   `User` uses a select that omits it. A PIN is therefore checked with a
+   network round-trip, by design — see the PowerSync note below.
+7. A worker's PIN state is server-authoritative. Attempt count and
+   lockout expiry live on the `User` row, so clearing app data,
+   reinstalling, or moving to another device does not hand back a fresh
+   set of attempts.
