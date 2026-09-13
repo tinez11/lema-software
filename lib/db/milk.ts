@@ -7,17 +7,17 @@ import { prisma } from "./client"
 // Thin read helpers for herd-total milk production. One record per date and
 // session, guaranteed by the `@@unique([date, session])` constraint on
 // `MilkRecord` — never per animal.
+//
+// `MilkRecord` carries no financial columns, so there is one path per query
+// here: no `...WithFinancials()` variant exists or is needed.
 
-export function listMilkRecords(
+export function getMilkRecords(
   options: { from?: Date; to?: Date; take?: number } = {}
 ) {
   const { from, to, take } = options
 
   return prisma.milkRecord.findMany({
-    where:
-      from || to
-        ? { date: { gte: from, lte: to } }
-        : undefined,
+    where: from || to ? { date: { gte: from, lte: to } } : undefined,
     orderBy: [{ date: "desc" }, { session: "asc" }],
     take,
   })
@@ -36,10 +36,11 @@ export function getMilkRecordByClientId(clientId: string) {
 
 /** Total liters across both sessions over a date range. */
 export function sumMilkLiters(options: { from?: Date; to?: Date } = {}) {
-  const { from, to } = options
-
   return prisma.milkRecord.aggregate({
-    where: from || to ? { date: { gte: from, lte: to } } : undefined,
+    where:
+      options.from || options.to
+        ? { date: { gte: options.from, lte: options.to } }
+        : undefined,
     _sum: { liters: true },
   })
 }

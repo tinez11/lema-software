@@ -106,6 +106,36 @@ defaults to next-themes' `system`.
   worker-facing screens stay flat and high-contrast, since speed and
   outdoor legibility matter more than mood there.
 
+## Owner vs. Worker Treatment
+
+The difference is concrete, not a mood — same palette, same radii, two
+densities:
+
+| | Owner | Worker |
+| --- | --- | --- |
+| Panel fill | `--bg-surface` | `--bg-surface` |
+| Panel edge | 1px `--border-default` + `shadow-sm` | 2px `--border-default`, no shadow |
+| Panel padding | `p-6`, `gap-6` between blocks | `p-5`, `gap-8` between blocks |
+| Body type | `text-sm` / `text-base` | `text-base` minimum, labels `text-lg` |
+| Primary action | inline, sized to content | full width |
+| Touch targets | `h-9`–`h-11` | `h-14` minimum |
+
+Worker screens drop shadows entirely: in direct sunlight a soft shadow
+reads as smudge, while a 2px border still separates a panel from the
+page. Owner screens keep the shadow because layering is what makes a
+dense dashboard scannable.
+
+## Primary Action Button
+
+The dominant action on a screen ("Log milk", "Checkout", "Unlock") is
+`h-14` (56px), `text-lg`, `font-semibold`, `rounded-xl` (16px). The
+shadcn `lg` size (`h-9`) is for secondary actions only — 36px is too
+small for a gloved thumb outdoors. On worker screens the primary action
+is also full width; on owner screens it sizes to its content.
+
+Sibling controls that must match that height — a PIN field, a quantity
+stepper — use `h-14` too, so a worker's row of targets is one size.
+
 ## Icons
 
 Lucide React . Outline-style icons only. `h-4 w-4` (16px) for inline
