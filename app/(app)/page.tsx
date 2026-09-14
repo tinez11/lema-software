@@ -1,15 +1,14 @@
-import Link from "next/link"
 import { UserButton } from "@clerk/nextjs"
-import { ChevronRightIcon, MilkIcon, SproutIcon } from "lucide-react"
+import { MilkIcon } from "lucide-react"
 import type { MilkSession } from "@prisma/client"
 
 import { MilkEntryForm } from "@/components/farm/milk-entry-form"
+import { ModuleNav } from "@/components/farm/module-nav"
 import { MilkHistoryList } from "@/components/farm/milk-history-list"
 import type { MilkHistoryEntry } from "@/components/farm/milk-history-list"
 import { WorkerPinList } from "@/components/farm/worker-pin-list"
 import type { CurrentUser } from "@/lib/auth/session"
 import { resolveAuthGate } from "@/lib/auth/session"
-import { cn } from "@/lib/utils"
 import { farmDate } from "@/lib/db/dates"
 import { getMilkRecordsForDate, getRecentMilkRecords } from "@/lib/db/milk"
 import type { MilkRecordWithRecorder } from "@/lib/db/milk"
@@ -49,36 +48,13 @@ function sessionForNow(at: Date = new Date()): MilkSession {
 }
 
 /**
- * The way to the other module with a write path.
+ * A milk record in the shape the history list renders, with dates already
+ * formatted and `editable` already decided.
  *
- * `project-overview.md` says a worker opens straight onto "their assigned
- * module" with no module switching — but `User` has no assigned-module column,
- * so there is nothing to route on, and without a link a worker could not reach
- * the harvest screen at all. Until that column exists, every worker can reach
- * both. Deliberately one link rather than a dashboard. See open question 15.
+ * `editable` repeats the two conditions `updateMilkRecord` enforces. That is
+ * not the permission check — the action and the query helper both re-run it —
+ * it only keeps the list from offering a button the server would refuse.
  */
-function LandLink({ treatment }: { treatment: "owner" | "worker" }) {
-  const worker = treatment === "worker"
-
-  return (
-    <Link
-      href="/land"
-      className={cn(
-        "flex items-center justify-between gap-3 rounded-xl bg-card transition-colors hover:border-gold",
-        worker ? "border-2 border-border p-5" : "border border-border p-4 shadow-sm"
-      )}
-    >
-      <span className="flex items-center gap-3">
-        <SproutIcon className="h-5 w-5 text-gold" aria-hidden />
-        <span className={cn("font-semibold", worker ? "text-lg" : "text-base")}>
-          Land &amp; Produce
-        </span>
-      </span>
-      <ChevronRightIcon className="h-5 w-5 text-muted-foreground" aria-hidden />
-    </Link>
-  )
-}
-
 function toHistoryEntry(
   record: MilkRecordWithRecorder,
   viewerId: string,
@@ -98,6 +74,13 @@ function toHistoryEntry(
   }
 }
 
+/**
+ * `/` — home, which routes on role.
+ *
+ * Both roles land in Cows & Milk because it is the module whose entry screen a
+ * worker opens the app to. The split below is the whole of the routing: a
+ * worker gets the entry screen alone, the owner gets the module home.
+ */
 export default async function Home() {
   const gate = await resolveAuthGate()
 
@@ -112,6 +95,14 @@ export default async function Home() {
   )
 }
 
+/**
+ * The worker's whole app: today's entry, their own entries, and the way to any
+ * other module they are assigned. No dashboard and no tabs, per
+ * `ui-context.md`'s worker treatment.
+ *
+ * The "logged today" list is scoped to this worker. They can only correct
+ * their own entries anyway, and a shared list would invite them to try.
+ */
 async function WorkerMilkEntry({ user }: { user: CurrentUser }) {
   const today = farmDate()
   const mine = await getMilkRecordsForDate(today, { recordedById: user.id })
@@ -142,12 +133,24 @@ async function WorkerMilkEntry({ user }: { user: CurrentUser }) {
           />
         </section>
 
-        <LandLink treatment="worker" />
+        <ModuleNav
+          assignedModules={user.assignedModules}
+          current="MILK"
+          treatment="worker"
+        />
       </main>
     </div>
   )
 }
 
+/**
+ * The owner's Cows & Milk home: the same entry form, plus everyone's recent
+ * entries and the PIN controls.
+ *
+ * Deliberately not the three-module dashboard `ui-context.md` describes —
+ * that needs all three modules writable, and is tracked in the progress
+ * tracker's Next Up rather than half-built here.
+ */
 async function OwnerMilkHome({ user }: { user: CurrentUser }) {
   const today = farmDate()
 
@@ -201,15 +204,20 @@ async function OwnerMilkHome({ user }: { user: CurrentUser }) {
           />
         </section>
 
-        <LandLink treatment="owner" />
+        <ModuleNav
+          assignedModules={user.assignedModules}
+          current="MILK"
+          treatment="owner"
+        />
 
         {/* Kept from the auth unit: a forgotten PIN has no other way out, and
             this is still the owner's only screen. */}
         <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">Worker PINs</h2>
+          <h2 className="text-lg font-semibold">Worker access</h2>
           <p className="text-sm text-muted-foreground">
-            Resetting clears a worker&apos;s PIN and any lockout. They choose a
-            new one the next time they open the app.
+            A new account has no access until you approve it — signing up in
+            Clerk does not grant any on its own. Resetting a PIN clears it and
+            any lockout; they choose a new one the next time they open the app.
           </p>
           <WorkerPinList />
         </section>

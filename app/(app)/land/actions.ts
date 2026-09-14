@@ -29,9 +29,10 @@ import {
 // Setting up fields and crop cycles is registry work; logging a harvest
 // against one is the daily job, and either role does that.
 //
-// Nothing in this file touches a `Decimal`. `InputRecord` — the module's only
-// money-bearing model — is deliberately out of this unit, so open question 6
-// stays open for whichever of Land's cost entry or Shop gets built next.
+// Nothing in this file touches money. `InputRecord` — the module's only
+// money-bearing model — is deliberately out of this unit. When its cost entry
+// lands, the amount arrives from the client as integer cents and
+// `fromCents()` converts it before the query: see `lib/db/money.ts`.
 
 const nameSchema = z
   .string()
@@ -128,6 +129,12 @@ export type LogHarvestResult =
   | { status: "invalid"; message: string }
   | { status: "not-allowed" }
 
+/**
+ * The first validation message from a failed parse.
+ *
+ * One message, not all of them: these forms are read on a phone, and a stack
+ * of complaints under a small screen is worse than the first thing to fix.
+ */
 function firstIssue(error: z.ZodError): string {
   return error.issues[0]?.message ?? "That entry doesn't look right."
 }

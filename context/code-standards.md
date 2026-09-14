@@ -60,6 +60,24 @@
 - Never add a `role` parameter to a query helper and branch on it. The
   two paths are two exports; the caller picks one after checking the
   role, and `WithPricing`/`WithFinancials` is what an audit greps for.
+- **Money leaves `lib/db/` as an integer number of cents, never as a
+  `Decimal` and never as a float or a string.** A `Decimal` is not
+  serialisable into a client component; a string cannot be arithmetic
+  without being parsed back into a float, which is the precision problem
+  the column exists to prevent, and the POS screen multiplies quantity
+  by price on every tap. `toCents()` / `fromCents()` in `lib/db/money.ts`
+  are the only place the conversion happens — reads convert on the way
+  out, writes convert on the way back in.
+- **A cents value is named for its unit**: `unitPriceCents`,
+  `totalAmountCents`, `costCents`, `subtotalCents`. The suffix is not
+  decoration — a bare `unitPrice: 1250` reads as 1,250 whole units to
+  the next person, and money that is wrong by 100× is the kind of bug
+  that reaches a customer.
+- **Format only at final render.** Dividing by 100 to display is the
+  last thing that happens to a number, never something done before
+  storage or in the middle of a calculation. `fromCents()` throws on a
+  fractional cent rather than rounding, because silently rounding money
+  is how a till stops balancing.
 
 ## File Organization
 

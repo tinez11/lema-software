@@ -46,6 +46,11 @@ export function roundQuantity(quantity: number): number {
   return Math.round(quantity * factor) / factor
 }
 
+/**
+ * Whether a quantity is one the server will accept: a real number, at least
+ * the minimum, no more than the ceiling. The action re-checks this through
+ * `zod` — this is the same rule in the form the client can call.
+ */
 export function isValidQuantity(quantity: number): boolean {
   return (
     Number.isFinite(quantity) &&

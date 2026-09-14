@@ -54,6 +54,13 @@ type HarvestEntryFormProps = {
 
 const UNIT_OPTIONS = HARVEST_UNITS.map((unit) => ({ value: unit, label: unit }))
 
+/**
+ * The harvest entry form, for both roles.
+ *
+ * `treatment` selects the density from `ui-context.md`'s owner/worker table —
+ * panel edge, padding and button width — and nothing else. What the form does,
+ * and what the server will accept, is identical for both.
+ */
 export function HarvestEntryForm({
   treatment,
   dateLabel,
@@ -69,6 +76,7 @@ export function HarvestEntryForm({
 
   const ready = cropCycleId !== "" && quantity >= MIN_HARVEST_QUANTITY
 
+  /** Sends the entry and turns each typed result into something to read. */
   function save() {
     if (!ready || pending) return
 
@@ -247,6 +255,7 @@ export function HarvestEntryForm({
   )
 }
 
+/** The one-line result of a save: what happened, and whether it worked. */
 function FeedbackNote({
   feedback,
   worker,

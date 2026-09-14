@@ -23,6 +23,13 @@ type HarvestHistoryListProps = {
   treatment: "owner" | "worker"
 }
 
+/**
+ * Recent harvests, already shaped and formatted by the page.
+ *
+ * Takes pre-formatted strings rather than rows because the dates have to be
+ * formatted in UTC to match the civil day they were stored under, and that is
+ * the server's job — see `lib/db/dates.ts`.
+ */
 export function HarvestHistoryList({
   entries,
   emptyMessage,

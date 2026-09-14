@@ -29,6 +29,10 @@ type CropCycleFormProps = {
   todayValue: string
 }
 
+/**
+ * Owner-only form for opening a crop cycle on a field. Same arrangement as
+ * `FieldForm`: hidden from workers, and refused by the action besides.
+ */
 export function CropCycleForm({ fields, todayValue }: CropCycleFormProps) {
   const [fieldId, setFieldId] = useState(fields[0]?.id ?? "")
   const [cropType, setCropType] = useState("")
@@ -40,6 +44,7 @@ export function CropCycleForm({ fields, todayValue }: CropCycleFormProps) {
 
   const ready = fieldId !== "" && cropType.trim() !== "" && plantingDate !== ""
 
+  /** Sends the form and turns each typed result into something to read. */
   function save() {
     if (!ready || pending) return
 

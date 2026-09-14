@@ -7,21 +7,25 @@ complete and every check in all three of its specs was verified,
 including the owner and worker flows walked end to end in a browser
 against the live Clerk instance and Postgres.
 
-Two of the three write paths are built and verified at the data and
-action layers: milk entry (`04-milk-entry.md`) and harvest entry
-(`05-land-produce.md`). The browser walkthroughs of both screens are
-what remain; see "In Progress".
+**All three write paths are built** and verified at the data and action
+layers: milk (`04-milk-entry.md`), harvest (`05-land-produce.md`) and
+the shop till (`06-shop.md`). Every module is navigable, and the two
+questions that gated Shop — 6 and 15 — are answered and implemented.
+What remains before Phase 1 can be called done is the browser
+walkthrough of each screen; see "In Progress".
 
 ## Current Goal
 
-Finish Phase 1: all three modules writable end to end. Cows & Milk went
-first because `MilkRecord` is the simplest shape and its
-`@@unique([date, session])` constraint is the invariant most worth
+Close out Phase 1 by walking all three screens in a browser, then build
+the three-module owner dashboard — which is now unblocked for the first
+time, since every module has something real to show.
+
+Cows & Milk went first because `MilkRecord` is the simplest shape and
+its `@@unique([date, session])` constraint is the invariant most worth
 exercising early. Land & Produce followed, deliberately without its
-money-bearing `InputRecord`. Shop is last, and it is the one that forces
-open question 6 — how a `Decimal` crosses the server/client boundary —
-because it cannot be built without money on screen. Only once all three
-write does the three-module owner dashboard become buildable.
+money-bearing `InputRecord`. Shop came last because it could not be
+built without money on screen, and it is where invariant 4 — stock never
+negative — first had to hold under real contention.
 
 ## Completed
 
@@ -245,6 +249,97 @@ all of whose rows were deleted afterwards.
 | Extra — dates | ✅ `parseFarmDate` rejects a non-date and 31 February, and reads a real day as midnight UTC; a cycle's planting and expected-harvest dates read back as the civil days given |
 | Extra — action input validation | ✅ 26 cases across the three schemas: empty names, zero/negative/NaN/over-ceiling acres, impossible and non-dates, an expected harvest before its planting date, an unknown unit, a string quantity, `Infinity`, a `null` body — all rejected; an empty optional note becomes `null` rather than `""`; a client-supplied `recordedById` is stripped |
 
+- **Open questions 6 and 15 settled, before `06-shop.md` is drafted** ✅
+  Both gated Shop, and the tracker said so: 6 because Shop is entirely
+  financial, 15 because Shop is the third destination that finally
+  breaks a hardcoded `/land` link.
+  - **6 — money is integer cents.** `lib/db/money.ts` (`toCents` /
+    `fromCents`, plus nullable variants) is the only conversion, both
+    directions. All seven privileged helpers across `animals.ts`,
+    `land.ts` and `shop.ts` now return `...Cents` integers, so no
+    `Decimal` leaves `lib/db/` anywhere. `fromCents()` throws on a
+    fractional cent rather than rounding.
+  - **15 — `User.assignedModules Module[] @default([])`**, migration
+    `20260913205123_add_worker_module_assignment`. Empty means all
+    three, so the change took nothing from any existing row.
+    `lib/modules.ts` interprets it; `components/farm/module-nav.tsx`
+    renders it and replaced both the hardcoded `/land` link on the home
+    screen and the hand-rolled "Back" link on `/land`.
+  - The `prisma/schema.prisma` edit was made deliberately, as
+    `ai-workflow-rules.md` requires of a protected file, and
+    `context/schema.prisma` carries the same edit byte-for-byte.
+  - Open question 18 (desktop layout) logged, having been raised earlier
+    and never recorded. Open question 19 (an owner control to actually
+    narrow an assignment) logged as the deliberate follow-up to 15.
+
+### Verification of the two decisions
+
+| Check | Result |
+| --- | --- |
+| Cents conversion is exact | ✅ 12.50 → 1250, 0.01 → 1, 0 → 0, and 99999999.99 (the `Decimal(10, 2)` ceiling) → 9999999999 without loss |
+| The round trip is lossless | ✅ seven amounts through `Decimal` → cents → `Decimal` all returned identical, including 0.07 and 0.10 |
+| Cents arithmetic beats the float it replaces | ✅ `0.1 + 0.2 !== 0.3` while `10 + 20 === 30`; a 3-line sale at 19.99 came to exactly 5997 cents / 59.97 |
+| A fractional cent is refused, not rounded | ✅ `fromCents(12.5)` throws |
+| Privileged helpers return integers, not `Decimal` | ✅ against a live `StockItem` at 12.50, `getStockItemsWithPricing` returned `unitPriceCents: 1250` with no `unitPrice` key and no `Decimal` instance |
+| Invariant 2 still holds | ✅ the safe `getStockItems` returns neither `unitPrice` nor `unitPriceCents` |
+| Writes convert back | ✅ writing `fromCents(1999)` stored 19.99 in the column |
+| An empty money aggregate is 0, not null | ✅ `sumInputCostWithFinancials` on a cycle with no inputs returned `{ totalCents: 0 }` |
+| An empty assignment means all three modules | ✅ `modulesFor([])` returns all three; `modulesFor(["LAND"])` returns only Land |
+| Assignment order is stable | ✅ `modulesFor(["SHOP", "MILK"])` returns MILK, SHOP — registry order, not stored order |
+| Shop can be assigned but never linked | ✅ its `href` is null, so the nav filters it out until the route exists |
+| A new row defaults to empty | ✅ a freshly created user came back with `assignedModules: []`, and `getUserById` still omits `pinHash` (invariant 6) |
+| A narrowed assignment round-trips | ✅ `["LAND", "SHOP"]` stored and read back, resolving to Land alone once Shop is filtered for having no route |
+| **The migration took access from nobody** | ✅ counted against the live table: **zero** existing users have a non-empty assignment, so every one of them still sees every module |
+| `npm run build` / `npm run lint` / `tsc` | ✅ all pass |
+
+- **`06-shop.md` — the third write path** ✅ (browser walkthrough
+  outstanding — see "In Progress")
+  - **Part 1 was already done.** `enum Module`, `User.assignedModules`,
+    the migration, the module nav and `lib/db/money.ts` all landed when
+    open questions 6 and 15 were settled ahead of this spec being
+    drafted. Re-checked line by line against Part 1's wording; the only
+    gap was that `SHOP` had no route, which this unit gives it.
+  - `lib/db/shop.ts`: `createStockItem`, `recordSale`,
+    `getStockItemsForSale`, `getSalesHistory` and its
+    `...WithFinancials()` twin.
+  - `recordSale` is one transaction. Each line decrements with a
+    conditional `updateMany` (`quantity: { gte: requested }`); a zero
+    affected count rolls the whole sale back and returns a typed
+    `insufficient-stock`. Prices are read from the stock rows *inside*
+    the transaction — a till never names its own price.
+  - `app/(app)/shop/actions.ts` — `createStockItemAction` (owner-gated as
+    its first statement) and `recordSaleAction`. Cents in both
+    directions, never a `Decimal`.
+  - `lib/shop-config.ts` for the bounds; `lib/money.ts` for
+    `formatCents()`, added now that money is finally on a screen.
+  - The till (`sale-terminal.tsx` + `stock-item-grid.tsx`), the owner's
+    `stock-item-form.tsx`, `sales-history-list.tsx`, and
+    `app/(app)/shop/page.tsx` at `/shop`. `SHOP` gained its route in
+    `lib/modules.ts`, so all three modules are now navigable.
+
+### Verification of `06-shop.md`
+
+Run against the live Prisma Postgres with a temporary owner and worker;
+every row created was deleted afterwards and the three shop tables were
+back to 0.
+
+| Check from the spec | Result |
+| --- | --- |
+| A worker cannot create a `StockItem`, and the rejection happens before validation | ✅ `requireOwner()` is the first statement in `createStockItemAction`, before `safeParse`; a ready worker gets `not-owner`, distinct from `invalid` |
+| Overselling is refused with the typed `insufficient-stock`, no partial sale | ✅ a 99-unit sale against 7 in stock returned the typed reason naming the item, `available: 7` and `requested: 99`; stock was untouched and no `Sale` row was created. A two-line sale where only the second line overran rolled the first line's decrement back too |
+| **Verified under concurrency, not just sequentially** | ✅ ten simultaneous sales of 2 against 10 in stock: **exactly 5 succeeded**, 5 returned `insufficient-stock`, stock landed on **exactly 0**, and `SaleItem` rows summed to exactly 10 units |
+| Control — the test is not vacuous | ✅ the read-then-write pattern this replaces, run against the same database and the same 10 units, left **8** in stock: nine of the ten decrements were lost. The conditional update left 0 |
+| A successful sale decrements by exactly the sold quantity and prices from the item's price at sale time | ✅ 3 × 12.50 decremented 10 → 7 and wrote `unitPrice` 12.50 / `subtotal` 37.50 / `totalAmount` 37.50. Repricing the item to 99.00 afterwards left the existing `SaleItem` at 12.50 |
+| No `Decimal` in a client-rendered payload | ✅ every payload the shop page passes to a component was walked recursively — `getStockItemsForSale`, both history reads, nested line items included — and contains **zero** `Prisma.Decimal` instances; every money field is an integer `...Cents` |
+| A worker assigned `SHOP` but not `LAND` sees only the shop link | ✅ `modulesFor(["SHOP"])` resolves to Shop alone, and `ModuleNav` drops the module being viewed |
+| `npm run build` passes | ✅ 10 routes, `/shop` compiled |
+| `npm run lint` passes | ✅ exit 0 |
+| Extra — an unknown item is its own reason | ✅ `unknown-item`, not `insufficient-stock`; a conditional update matches no rows in both cases, and telling a worker "not enough stock" about something that never existed sends them to count a shelf that isn't there |
+| Extra — duplicate lines merge | ✅ two lines of 2 for one item became one line of 4 and one decrement of 4, so neither could pass the stock check on its own |
+| Extra — invariant 2 at the last mile | ✅ the worker's `getSalesHistory` carries no key matching total/price/subtotal/amount/cost anywhere, line items included; the owner's twin carries all of them as integer cents |
+| Extra — a new item starts at zero stock | ✅ stocking the shelf stays a separate explicit act (invariant 3) |
+| Extra — `formatCents` | ✅ 3750 → "37.50", 5 → "0.05" |
+
 ## In Progress
 
 Both `04-milk-entry.md` and `05-land-produce.md` are built and verified
@@ -268,6 +363,19 @@ browser work, and it is **not yet done**:
 4. The worker path walked: reach `/land` from the home screen, log a
    harvest, and confirm the Setup section is absent.
 
+**Shop**
+
+5. The owner path walked: add a stock item, restock it (directly in the
+   database for now — see open question 21), ring up a sale, and confirm
+   the total appears on the history row.
+6. The worker path walked: reach `/shop`, ring a sale, and confirm the
+   Setup section is absent **and that no total shows on any history
+   row** — that last part is invariant 2 at the last mile, and it is the
+   one thing on these screens a data-layer test cannot see.
+7. An oversell attempted through the real UI at least once, so the typed
+   refusal is confirmed to reach the screen as a message rather than a
+   crash.
+
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
 re-render them in the action's own response. If a saved entry does not
@@ -278,18 +386,15 @@ test can reach.
 ## Next Up
 
 1. Finish the walkthroughs above.
-2. Shop — the third write path. Same shape: `lib/db/` write helpers, an
-   `app/(app)/shop/actions.ts`, and the screens. It is also where
-   invariant 4 (stock never goes negative) first has to hold. Per
+2. **The three-module owner dashboard** — the metric card grid and the
+   cross-module "needs attention" list. Unblocked for the first time:
+   all three modules now have data worth showing. Per
    `ai-workflow-rules.md`, Phase 3 (PowerSync offline sync) does not
    start until Phase 1 is complete.
-3. **Open question 6 — `Decimal` at the server/client boundary — is now
-   the next real blocker.** It has been deferred out of two units in a
-   row, deliberately and correctly. Whatever comes next has money in it:
-   Shop's `unitPrice` / `totalAmount` / `subtotal`, or Land's
-   `InputRecord.cost` and the cost-vs-yield reporting it feeds. Settle
-   it once, at the start of that unit, before the first screen renders a
-   number.
+3. Land's own `InputRecord` — cost entry and the cost-vs-yield
+   reporting it feeds. Left out of `05-land-produce.md` because it
+   forced open question 6; that is now answered, so it is unblocked
+   whenever it is wanted.
 4. The three-module owner dashboard — the metric card grid and the
    cross-module "needs attention" list — once all three modules can be
    written to.
@@ -316,11 +421,22 @@ test can reach.
    inside `lib/db/` as two exports per financial query. See the
    decision below; `architecture.md` invariant 2 and
    `code-standards.md` now carry the rule.
-6. **`Decimal` across the server/client boundary.** Cost, price, and
-   `totalAmount` come back as Prisma `Decimal` objects, which are not
-   serialisable into a client component. Settle on one conversion
-   (string at the DTO boundary, most likely) before the first screen
-   renders money.
+6. ~~**`Decimal` across the server/client boundary.**~~ Resolved —
+   **integer cents**, converted at the `lib/db/` boundary in both
+   directions by `toCents()` / `fromCents()` in `lib/db/money.ts`. The
+   original guess in this entry was a string at the DTO boundary; that
+   was rejected on inspection. A string displays fine but cannot be
+   arithmetic, and the POS screen recalculates quantity × price on every
+   stepper tap — so a string would have to be parsed back into a float
+   exactly where precision matters most, which is the problem the
+   `Decimal` column exists to prevent. Integer cents are exact at any
+   scale this farm will see, the client never holds a float representing
+   money, and formatting happens only at final render. Every cents value
+   is named for its unit (`unitPriceCents`, `costCents`, …) so a bare
+   1250 cannot be misread as 1,250 whole units. All seven existing
+   `...WithPricing()` / `...WithFinancials()` helpers were converted, so
+   no `Decimal` leaves `lib/db/` anywhere. `architecture.md` and
+   `code-standards.md` now carry the rule.
 7. **`prisma-client-js` is deprecated.** It still generates in 7.10.0 and
    the schema is unchanged from `context/schema.prisma`, but Prisma's
    newer `prisma-client` generator writes to an explicit `output` path
@@ -379,17 +495,20 @@ test can reach.
    so the entry screen currently says nothing rather than claiming a
    local save it did not make. Add the indicator with the sync layer,
    not before.
-15. **A worker has no assigned module, so they can reach both.**
-   `project-overview.md` says a worker opens straight onto "the entry
-   screen for their assigned module — no dashboard, no module
-   switching". `User` has no assigned-module column, so there is nothing
-   to route on; and `05-land-produce.md` says both roles log harvests,
-   which would be unreachable with no link at all. Both home screens
-   therefore carry a single `/land` link — one link, deliberately not a
-   dashboard. Resolving this properly means a column on `User` (one
-   module, or a set), which is a `prisma/schema.prisma` change and so a
-   reviewed decision, not a feature side effect. Worth settling before
-   Shop adds a third destination.
+15. ~~**A worker has no assigned module, so they can reach both.**~~
+   Resolved — `User.assignedModules Module[] @default([])`, with a new
+   `enum Module { MILK LAND SHOP }`. A plain Postgres array column; no
+   join table, because a module list is a fixed, tiny set with nothing
+   to hang off the relationship. **Empty means all three**, which is
+   what makes it additive rather than a regression: every row that
+   existed before the migration has an empty array and keeps exactly the
+   access it had. `lib/modules.ts` interprets it and
+   `components/farm/module-nav.tsx` renders it, replacing the hardcoded
+   `/land` link the Land unit left behind. A module with no screen yet
+   (Shop) is never linked, so an assignment can name it before it
+   exists. Migration `20260913205123_add_worker_module_assignment`.
+   An owner-facing screen to actually narrow a worker's assignment is a
+   follow-up, not part of this change — see open question 19.
 16. **The harvest unit set is a guess.** `HarvestRecord.unit` is a free
    `String` in the schema, but `sumHarvestQuantity()` groups by it, so
    free text would split one crop's yield across "kg", "Kg" and "kilos"
@@ -404,6 +523,61 @@ test can reach.
    there is only ever one season's worth. The moment the `PLANNED` →
    `GROWING` → `HARVESTED` transition lands, the picker needs either the
    planting year or a filter to open cycles.
+18. **Nothing defines what any screen looks like on a computer.**
+   `project-overview.md` puts "a PWA usable on both phone and computer"
+   in scope, and `architecture.md` lists the platform as phone **and**
+   computer. But every screen built so far is phone-shaped: a single
+   column capped at `max-w-xl` (worker) or `max-w-2xl` (owner), which on
+   a desktop is a narrow strip in the middle of an empty page. Nothing
+   in `ui-context.md` describes a wide-viewport layout, and its only
+   mention of the axis is one clause about the owner dashboard's metric
+   grid "collapsing to a single column on phone widths" — a dashboard
+   that does not exist yet. The open question is whether a computer gets
+   a genuinely different layout (multi-column, a persistent module
+   sidebar — note the unused `--sidebar-*` tokens in open question 4) or
+   whether the centred phone column is the intended answer for both.
+   Worth settling before the owner dashboard is built, since that is the
+   screen where the difference actually costs something. **Logged late:
+   this was raised earlier and never recorded, which is why it is here
+   now rather than at its proper number.**
+19. **No way to narrow a worker's module assignment.**
+   `User.assignedModules` exists and is enforced (open question 15), but
+   nothing writes it — every worker's array is empty, so everyone is
+   offered every module. The owner needs a control for it, most
+   naturally beside the existing "Worker PINs" section on their home
+   screen, which is already the one owner-facing admin surface. Small,
+   and deliberately not bundled into the schema change.
+20. **No currency is named anywhere.** `project-overview.md` rules
+   multi-currency out of scope, so there is exactly one — it has simply
+   never been written down. `formatCents()` therefore renders a bare
+   grouped amount ("1,234.56") with no symbol, because inventing one
+   would put a fabricated fact on every price tag and receipt. Name it
+   in `ui-context.md` and the formatter takes one line to change.
+21. **Nothing restocks the shop.** `createStockItem` starts an item at
+   zero and `recordSale` only decrements, so stock can go down and
+   never up through the UI. `StockAdjustment` exists in the schema with
+   a `RESTOCK` type and `getStockAdjustments()` already reads it, but
+   `06-shop.md` did not ask for the write and inventing it would have
+   been scope the spec deliberately left out. Until it lands, a shelf is
+   stocked by editing the database. This is the most immediately
+   practical gap of the three.
+22. **A sale writes no `StockAdjustment`.** The enum carries
+   `SALE_DEDUCTION`, which strongly suggests sales are meant to leave a
+   trace in the movement log, but `06-shop.md` specified `recordSale` as
+   `Sale` + `SaleItem` only and that is what was built. The effect is
+   that the adjustment log is not a complete history of stock movement —
+   anything reading it to reconcile a shelf will be wrong by whatever
+   has been sold. Decide it with open question 21, since they touch the
+   same table.
+23. **Pending vs. revoked is inferred, not recorded.** An inactive row
+   is read as *pending* when `pinSetAt` is null and *revoked* when it is
+   not, which is right in every ordinary case. The one it reads
+   generously: an owner approves someone, that person never opens the
+   app, and the owner then revokes them — they see "Waiting for
+   approval" rather than "Access revoked". Both are true enough, and
+   neither has access. An explicit `approvedAt DateTime?` on `User`
+   would make it exact; it is a schema change, so it waits for a
+   deliberate decision rather than riding along with a security fix.
 
 ## Architecture Decisions
 
@@ -629,6 +803,94 @@ test can reach.
   holds for units and sessions. A crop cycle picker is unbounded, so it
   gets a `Select` — sized `h-14` with a 2px edge so it still matches the
   row it sits in.
+- **A Clerk account is not authorisation — access is default-deny.**
+  Found in use, not in review: anyone could reach Clerk's hosted sign-up
+  page (`<SignIn />` links to it), and the webhook then created them a
+  live `WORKER` row. They set their own PIN and were in, with the milk
+  screen, the harvest screen and the till. `architecture.md` had claimed
+  that removing the in-app `/sign-up` route "closes the app's own front
+  door"; it did not, and that line has been corrected rather than left
+  to mislead the next reader.
+
+  The webhook now creates `active: false` and the owner approves
+  explicitly. The Clerk instance restriction is still worth setting —
+  it stops unwanted accounts existing at all — but it is a single
+  external toggle this codebase cannot read back or assert, so it is
+  now the second line rather than the only one. **The fix is that the
+  app stopped inferring authorisation from authentication.**
+- **Revoking does not clear the PIN.** It writes `active` and nothing
+  else. `resolveAuthGate()` refuses an inactive user before a PIN is
+  ever checked, so a revoked worker's PIN is already inert — and
+  `pinSetAt` is the only thing distinguishing a never-approved account
+  from a revoked one. Wiping it would show every revoked worker
+  "Waiting for approval", which is both wrong and an invitation to ask
+  again.
+- **Approve is one tap, revoke is two.** Approving grants access to
+  someone the owner went looking for. Revoking cuts someone off
+  mid-shift, so it takes the same two-tap confirm as the PIN reset
+  beside it.
+- **Invariant 4 is enforced by the database, not by application code.**
+  `recordSale` decrements each line with a conditional `updateMany`
+  carrying `quantity: { gte: requested }`, inside one transaction. The
+  read and the write are a single statement holding a single row lock,
+  so two tills cannot both see six bags and both sell four. Measured
+  rather than assumed: ten concurrent sales of two units against ten in
+  stock left **8** under the read-then-write version — nine of ten
+  decrements lost — and exactly **0** under the conditional update, with
+  five sales succeeding. That control is what makes the concurrency test
+  meaningful rather than decorative.
+- **A busy transaction is a typed result, not an exception.** The
+  concurrency test surfaced a real defect: Prisma's default 5s
+  interactive-transaction timeout was blown by ten simultaneous sales
+  against a pooled remote Postgres, and the tenth failed with a raw
+  `P2028` that escaped as an unhandled error. The budget is now
+  `maxWait` 10s / `timeout` 20s, and a timeout that still happens comes
+  back as `{ ok: false, reason: "busy" }` — "ring it again" is something
+  a worker at a till can act on, a stack trace is not. Nothing is
+  written when it happens, so a retry is safe. **This is the argument
+  for testing concurrency rather than sequences: nothing sequential
+  would ever have shown it.**
+- **A till never names its own price.** `recordSale` reads each price
+  from the stock row *inside* the transaction; the client sends item ids
+  and quantities and nothing else. A price that crossed the wire could
+  be edited to zero. It also means a later price change cannot rewrite
+  what was already sold — verified by repricing an item to 99.00 and
+  confirming the existing `SaleItem` stayed at 12.50.
+- **`getStockItemsForSale()` is a documented carve-out from invariant
+  2, not a breach of it.** A till cannot ring a sale without a price,
+  and the worker is reading that price to the customer as they serve
+  them. What the invariant protects is cost, margin and revenue — none
+  of which appear there, and nothing in it aggregates. Recorded in
+  `architecture.md` inside invariant 2 itself, so the next reader finds
+  the reasoning where they find the rule, rather than discovering a safe
+  export with a price on it and assuming the rule had rotted.
+- **`ChoiceGrid` was *not* reused for the item grid.** The spec said to
+  reuse it if it fits; it does not. `ChoiceGrid` is a radio group — one
+  exclusive value with a checked state — and a till's item grid is a row
+  of actions that each add to a running cart, with no selection at all.
+  Bending one component to do both would have needed a mode flag that
+  makes every existing caller read worse, which is forking under another
+  name. `QuantityStepper` *is* reused, on each cart line, where the
+  shape genuinely matches.
+- **Duplicate sale lines are merged before anything is written.** Two
+  lines of three for one item would otherwise be checked against stock
+  separately, and both could pass while the pair does not. Merging first
+  means one decrement per item, so the conditional update guards the
+  whole quantity at once.
+- **An unknown item is its own reason.** A conditional update matches no
+  rows both when stock is short and when the item does not exist.
+  Reporting "not enough stock" for something that was never stocked
+  sends a worker to count a shelf that isn't there, so the items are
+  read first and a missing one returns `unknown-item`.
+- **The cart is not persisted.** An interrupted cash sale is re-rung,
+  which is what happens at a till anyway; persisting a half-finished
+  sale would leave stock ambiguously committed with nothing to release
+  it.
+- **Money is formatted without a currency symbol.** Nothing in the
+  context files names a currency (open question 20), and a symbol on
+  every price tag is exactly the sort of invented product fact
+  `ai-workflow-rules.md` forbids. `formatCents` groups and fixes to two
+  decimals; naming the currency later is a one-line change.
 - **The owner's home is one module, not the dashboard.** The spec was
   explicit and it is the right call: a three-module dashboard built now
   would have two cards reading from modules with no write path. The
@@ -660,6 +922,23 @@ test can reach.
 - `prisma migrate dev` does **not** regenerate the client in Prisma 7 —
   run `npx prisma generate` after a migration or `tsc` will still be
   typing the old schema.
+- Prisma's interactive transactions default to `maxWait` 2s and
+  `timeout` 5s, and both are easy to exceed against a pooled remote
+  Postgres the moment two writers contend for the same row. The failure
+  is `P2028`, and it arrives as a thrown error rather than anything
+  typed. If a transaction holds a lock across more than a couple of
+  round trips, set the budget explicitly and handle `P2028`.
+- **Restart `next dev` after a migration, too.** Regenerating is not
+  enough for an already-running dev server: it fails with
+  `PrismaClientValidationError — Unknown field 'x' for select statement`
+  while a fresh `tsx` process, `tsc` and `next build` all pass on the
+  same code. The cause is the `globalThis` cache in `lib/db/client.ts`,
+  which exists so hot reload cannot leak connection pools. Hot reload
+  re-evaluates the module, but `globalForPrisma.prismaClient ?? …` hands
+  back the instance built from the *previous* generation, and that
+  instance still carries the old schema. Nothing in the code is wrong
+  when this happens — only the process is stale. This is the trade-off
+  of that cache, and it will recur on every schema change.
 - Moving a page between folders leaves a stale `.next/dev/types/`
   validator behind that fails `next build` with a missing-module error.
   `rm -rf .next/dev` clears it.

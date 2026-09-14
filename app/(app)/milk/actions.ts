@@ -23,9 +23,9 @@ import {
 // counts is the one Clerk answers with. Ownership and the same-day rule are
 // enforced a second time inside `updateMilkRecord` itself.
 //
-// Nothing in this file touches a `Decimal`. `MilkRecord` has no financial
-// column, so open question 6 — how money crosses the server/client boundary —
-// is untouched by this unit and still open for the modules that do have one.
+// Nothing in this file touches money: `MilkRecord` has no financial column.
+// The modules that do have one send integer cents and convert with
+// `fromCents()` before the query — see `lib/db/money.ts`.
 
 const sessionSchema = z.enum(MilkSession)
 

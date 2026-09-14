@@ -15,6 +15,11 @@ import { farmDate } from "./dates"
 
 // ───────────── Reads ─────────────
 
+/**
+ * Herd totals over a date range, newest day first and morning before evening
+ * within a day. Both bounds are inclusive and both are optional — passing
+ * neither returns everything, so pass `take` if the caller cannot hold it.
+ */
 export function getMilkRecords(
   options: { from?: Date; to?: Date; take?: number } = {}
 ) {
@@ -34,6 +39,13 @@ export function getMilkRecord(date: Date, session: MilkSession) {
   })
 }
 
+/**
+ * Looks up a record by the id the device generated while offline.
+ *
+ * This is how the sync layer will tell "this entry already reached the server"
+ * from "this is a new entry", so a replayed write becomes a no-op instead of a
+ * duplicate. Nothing writes `clientId` yet — PowerSync arrives in Phase 3.
+ */
 export function getMilkRecordByClientId(clientId: string) {
   return prisma.milkRecord.findUnique({ where: { clientId } })
 }

@@ -1,12 +1,12 @@
-import Link from "next/link"
 import { UserButton } from "@clerk/nextjs"
-import { ArrowLeftIcon, SproutIcon } from "lucide-react"
+import { SproutIcon } from "lucide-react"
 
 import { CropCycleForm } from "@/components/farm/crop-cycle-form"
 import { FieldForm } from "@/components/farm/field-form"
 import { HarvestEntryForm } from "@/components/farm/harvest-entry-form"
 import type { CropCycleOption } from "@/components/farm/harvest-entry-form"
 import { HarvestHistoryList } from "@/components/farm/harvest-history-list"
+import { ModuleNav } from "@/components/farm/module-nav"
 import type { HarvestHistoryEntry } from "@/components/farm/harvest-history-list"
 import { resolveAuthGate } from "@/lib/auth/session"
 import { farmDate, toDateInputValue } from "@/lib/db/dates"
@@ -21,10 +21,10 @@ import type { CropCycleForSelection } from "@/lib/db/land"
 // and crop cycles those harvests are logged against.
 //
 // `InputRecord` — cost entry and the cost-vs-yield reporting it feeds — is
-// deliberately absent. It is the module's only money-bearing model, and it
-// forces open question 6 (how a `Decimal` crosses the server/client boundary),
-// which Shop needs answered too. That gets settled once, in whichever of those
-// two units is built next.
+// deliberately absent: it is the module's only money-bearing model and was out
+// of this unit's scope. The question that held it up (how money crosses the
+// server/client boundary) is now answered — integer cents, `lib/db/money.ts` —
+// so it is unblocked whenever it is wanted.
 
 const dayFormat = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
@@ -45,6 +45,13 @@ function cycleLabel(cycle: CropCycleForSelection): string {
   return `${cycle.cropType} · ${cycle.field.name}`
 }
 
+/**
+ * `/land` — the Land & Produce screen, for both roles.
+ *
+ * One page rather than two: the harvest form and history are identical for a
+ * worker and the owner, and only the Setup section is gated. Splitting it by
+ * role would mean two copies of the same reads drifting apart.
+ */
 export default async function LandPage() {
   const gate = await resolveAuthGate()
 
@@ -86,13 +93,9 @@ export default async function LandPage() {
             : "flex items-center justify-between border-b-2 border-border px-5 py-4"
         }
       >
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-lg font-semibold hover:text-gold"
-        >
-          <ArrowLeftIcon className="h-5 w-5" aria-hidden />
-          Back
-        </Link>
+        <span className="text-lg font-semibold">
+          {owner ? "Farm & Shop Manager" : gate.user.name}
+        </span>
         <UserButton />
       </header>
 
@@ -125,6 +128,12 @@ export default async function LandPage() {
             emptyMessage="No harvests logged yet."
           />
         </section>
+
+        <ModuleNav
+          assignedModules={gate.user.assignedModules}
+          current="LAND"
+          treatment={owner ? "owner" : "worker"}
+        />
 
         {owner && (
           <section className="flex flex-col gap-3">

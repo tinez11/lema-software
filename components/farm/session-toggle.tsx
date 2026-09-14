@@ -40,6 +40,11 @@ type SessionToggleProps = {
   className?: string
 }
 
+/**
+ * Morning or evening, for a herd-total entry. A thin wrapper over
+ * `ChoiceGrid` — the cells, radios and accent live there; what is here is the
+ * milk-specific half.
+ */
 export function SessionToggle({
   value,
   onValueChange,

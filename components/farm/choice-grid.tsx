@@ -57,6 +57,13 @@ const ACCENT_CLASS = {
     "peer-checked:border-ochre peer-checked:bg-ochre peer-checked:text-ochre-foreground",
 } as const
 
+/**
+ * A radio group drawn as full-width cells.
+ *
+ * Generic over the option value so a caller keeps its own union — `MilkSession`
+ * for the session toggle, `HarvestUnit` for the unit picker — instead of
+ * widening to `string` and losing the check that every case is handled.
+ */
 export function ChoiceGrid<T extends string>({
   value,
   onValueChange,

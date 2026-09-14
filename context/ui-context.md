@@ -170,6 +170,36 @@ a stock item — does get a `Select`, at `h-14` with a 2px edge so it
 still matches the row it sits in. The line is whether the options are
 knowable in advance, not how many there happen to be today.
 
+## Navigation vs. Content
+
+Cross-module navigation is **ruled off and labelled**, never another card
+in the same stack.
+
+A nav row and a data row are the same shape — a bordered panel on a
+card fill — so stacking them in one column with one gap makes leaving
+the screen look like more of the screen. On the milk entry screen that
+put "Morning" and "Evening" directly above "Land & Produce" and "Shop"
+with nothing to tell them apart.
+
+`components/farm/module-nav.tsx` therefore renders as its own group:
+
+| | Owner | Worker |
+| --- | --- | --- |
+| Separator | `border-t` (1px) `--border-default` | `border-t-2` (2px) |
+| Space above the rule | `mt-2`, on top of the page's `gap-6` | `mt-4`, on top of the page's `gap-8` |
+| Space below the rule | `pt-6` | `pt-8` |
+| Heading | "Other modules", `text-sm` muted | same, `text-base` muted |
+
+The heading is deliberately **quieter** than the section heading above
+it ("Logged today" is `text-lg font-semibold`): it labels a way out of
+the screen, not another section of its data. The rule weight follows the
+same logic as panel edges — 2px for a worker, 1px plus shadow for the
+owner.
+
+The separation lives in the component, so every screen that renders it
+inherits it and no page overrides it. Individual rows — icon, label,
+chevron — are unchanged by the grouping.
+
 ## Module Accents in Practice
 
 Each module's accent marks its own screens, and the same three roles

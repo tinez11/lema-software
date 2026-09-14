@@ -17,6 +17,11 @@ import { MAX_NAME_LENGTH, MAX_NOTE_LENGTH } from "@/lib/land-config"
 // the spec asked for, and a registry nobody has filled in yet does not need
 // more.
 
+/**
+ * Owner-only form for registering a field. Rendered only inside the owner
+ * branch of `/land`, and `createFieldAction` refuses a non-owner regardless
+ * — the hiding is tidiness, the action is the boundary.
+ */
 export function FieldForm() {
   const [name, setName] = useState("")
   const [sizeAcres, setSizeAcres] = useState("")
@@ -25,6 +30,7 @@ export function FieldForm() {
   const [failed, setFailed] = useState(false)
   const [pending, startTransition] = useTransition()
 
+  /** Sends the form and turns each typed result into something to read. */
   function save() {
     if (pending || name.trim() === "") return
 

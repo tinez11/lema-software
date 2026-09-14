@@ -10,6 +10,7 @@ import type {
 
 import { prisma } from "./client"
 import { farmDate } from "./dates"
+import { toCents } from "./money"
 
 // Thin read helpers for Land & Produce: the field registry, crop cycles, and
 // the input/harvest records attached to a cycle.
@@ -35,14 +36,22 @@ const inputRecordSafeSelect = {
 
 // ───────────── Fields and cycles (no financial columns) ─────────────
 
+/** The field registry, alphabetically. Reference data — small and unpaged. */
 export function getFields() {
   return prisma.field.findMany({ orderBy: { name: "asc" } })
 }
 
+/** One field, or null. */
 export function getFieldById(id: string) {
   return prisma.field.findUnique({ where: { id } })
 }
 
+/**
+ * Crop cycles, newest planting first. Narrow by field, by status, or both.
+ *
+ * Note nothing in the app moves a cycle off `PLANNED` yet, so filtering by
+ * `GROWING` or `HARVESTED` returns nothing today — see open question 17.
+ */
 export function getCropCycles(
   options: { fieldId?: string; status?: CropCycleStatus } = {}
 ) {
@@ -57,6 +66,7 @@ export function getCropCycles(
   })
 }
 
+/** One crop cycle, or null. */
 export function getCropCycleById(id: string) {
   return prisma.cropCycle.findUnique({ where: { id } })
 }
@@ -82,6 +92,7 @@ export type CropCycleForSelection = Prisma.CropCycleGetPayload<{
   select: typeof cropCycleForSelection
 }>
 
+/** Every cycle, in the minimal shape described above, for a form's picker. */
 export function getCropCyclesForSelection(): Promise<CropCycleForSelection[]> {
   return prisma.cropCycle.findMany({
     select: cropCycleForSelection,
@@ -91,6 +102,11 @@ export function getCropCyclesForSelection(): Promise<CropCycleForSelection[]> {
 
 // ───────────── Inputs ─────────────
 
+/**
+ * Seed, fertilizer, pesticide and labour entries for a cycle, newest first.
+ * The safe path: its explicit select leaves `cost` out (invariant 2), so it
+ * answers "what went in" but never "what it cost".
+ */
 export function getInputRecords(
   options: { cropCycleId?: string; take?: number } = {}
 ) {
@@ -102,27 +118,54 @@ export function getInputRecords(
   })
 }
 
-/** Owner-only: includes `cost`. Verify `role === OWNER` before calling. */
-export function getInputRecordsWithFinancials(
+/**
+ * Owner-only: includes the input cost, as `costCents`. Verify `role === OWNER`
+ * before calling. Money leaves `lib/db/` as whole cents under a renamed key,
+ * never as a `Decimal` — see `lib/db/money.ts`.
+ */
+export async function getInputRecordsWithFinancials(
   options: { cropCycleId?: string; take?: number } = {}
 ) {
-  return prisma.inputRecord.findMany({
+  const records = await prisma.inputRecord.findMany({
     where: options.cropCycleId ? { cropCycleId: options.cropCycleId } : undefined,
     orderBy: { date: "desc" },
     take: options.take,
   })
+
+  return records.map(({ cost, ...record }) => ({
+    ...record,
+    costCents: toCents(cost),
+  }))
 }
 
-/** Owner-only: total input cost for one cycle. Verify `role === OWNER` first. */
-export function sumInputCostWithFinancials(cropCycleId: string) {
-  return prisma.inputRecord.aggregate({
+/**
+ * Owner-only: total input cost for one cycle, in cents. Verify
+ * `role === OWNER` first.
+ *
+ * A cycle with no inputs sums to 0 rather than null: "nothing spent yet" is
+ * zero cost, and handing every caller a nullable number invites a `?? 0` that
+ * one of them will forget.
+ */
+export async function sumInputCostWithFinancials(
+  cropCycleId: string
+): Promise<{ totalCents: number }> {
+  const { _sum } = await prisma.inputRecord.aggregate({
     where: { cropCycleId },
     _sum: { cost: true },
   })
+
+  return { totalCents: _sum.cost ? toCents(_sum.cost) : 0 }
 }
 
 // ───────────── Harvests (quantities only, no financial columns) ─────────────
 
+/**
+ * Raw harvest rows, newest first — quantities only, no joins.
+ *
+ * `getHarvestHistory()` is what a screen usually wants: same rows, plus the
+ * recorder and the crop they belong to. This one exists for callers that
+ * already know the context and do not want to pay for the joins.
+ */
 export function getHarvestRecords(
   options: { cropCycleId?: string; take?: number } = {}
 ) {
