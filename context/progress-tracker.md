@@ -395,10 +395,7 @@ test can reach.
    reporting it feeds. Left out of `05-land-produce.md` because it
    forced open question 6; that is now answered, so it is unblocked
    whenever it is wanted.
-4. The three-module owner dashboard — the metric card grid and the
-   cross-module "needs attention" list — once all three modules can be
-   written to.
-5. The animal registry, health records and breeding records; the
+4. The animal registry, health records and breeding records; the
    `CropCycle` status transition (`PLANNED` → `GROWING` → `HARVESTED`).
    All deliberately left out of the write paths because they neither
    block them nor share them.
@@ -578,6 +575,19 @@ test can reach.
    neither has access. An explicit `approvedAt DateTime?` on `User`
    would make it exact; it is a schema change, so it waits for a
    deliberate decision rather than riding along with a security fix.
+24. **A checkout retry could take payment twice.** If the network drops
+   *after* `recordSaleAction` commits but before the response arrives, the
+   till shows a failure for a sale that actually happened. The message no
+   longer claims the sale wasn't recorded — it now says to check the
+   recent sales list first — but that is a mitigation, not a fix. The
+   fix is an idempotency key: a stable id generated per checkout, sent
+   with the request, and stored under a unique constraint so a retry
+   returns the original sale instead of ringing a second one.
+   `Sale.clientId` is already `String? @unique` and is exactly the right
+   column — but it is reserved for the PowerSync layer, which will need
+   it to reconcile offline writes. Building a competing mechanism now
+   would mean two ideas about what `clientId` means. Do it **with**
+   Phase 3, where the same key serves both.
 
 ## Architecture Decisions
 
@@ -803,6 +813,27 @@ test can reach.
   holds for units and sessions. A crop cycle picker is unbounded, so it
   gets a `Select` — sized `h-14` with a 2px edge so it still matches the
   row it sits in.
+- **Module assignment is enforced, not decorative.** It arrived as a way
+  to decide which links a worker is offered, which made it a suggestion:
+  a worker narrowed to the shop could still type `/land` and log a
+  harvest. `requireModule()` in `lib/auth/roles.ts` now guards the page
+  read *and* the action write for all three modules, next to
+  `requireOwner()` and with the same shape. Owners are never restricted,
+  and an empty assignment still means all three — so the check refuses
+  nobody today (verified: all four user rows have empty assignments) and
+  starts mattering the moment an owner narrows someone, which is when
+  they would expect it to. The "empty means all" rule lives in exactly
+  one function, `isModuleAssigned()`, so the nav and the guard cannot
+  drift apart.
+- **`farmDate()` is idempotent.** It read a `Date` as an instant and
+  took the civil day where the server stands, so applying it to a value
+  that was already midnight UTC — what it and `parseFarmDate()` both
+  return — shifted it a day west of Greenwich. `createCropCycle`
+  normalised a date the action had already normalised, so on any server
+  in the Americas every planting date would have been stored a day
+  early, silently. A value already at exactly midnight UTC now passes
+  through untouched. The local machine sits east of UTC, which is why
+  neither the verification nor the browser ever showed it.
 - **A Clerk account is not authorisation — access is default-deny.**
   Found in use, not in review: anyone could reach Clerk's hosted sign-up
   page (`<SignIn />` links to it), and the webhook then created them a

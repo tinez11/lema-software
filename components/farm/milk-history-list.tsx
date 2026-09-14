@@ -43,6 +43,13 @@ type MilkHistoryListProps = {
   treatment: "owner" | "worker"
 }
 
+/**
+ * Today's entries, or recent ones, already shaped and formatted by the page.
+ *
+ * Takes pre-formatted date strings rather than `Date`s because a `@db.Date`
+ * has to be rendered in UTC to come back as the day it was logged, and that is
+ * the server's job — see `lib/db/dates.ts`.
+ */
 export function MilkHistoryList({
   entries,
   emptyMessage,
@@ -75,6 +82,12 @@ export function MilkHistoryList({
   )
 }
 
+/**
+ * One entry, with the inline correction control when the viewer may use it.
+ *
+ * Keeps its own edit state so opening one row does not disturb another, and so
+ * a failed save leaves that row's message beside that row.
+ */
 function MilkHistoryRow({
   entry,
   showRecorder,
@@ -91,6 +104,7 @@ function MilkHistoryRow({
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
+  /** Sends the correction and turns each typed result into something to read. */
   function save() {
     if (pending) return
 
@@ -112,6 +126,9 @@ function MilkHistoryRow({
             return
           case "invalid":
             setError(result.message)
+            return
+          case "not-assigned":
+            setError("You're not assigned to Cows & Milk any more.")
             return
           case "not-allowed":
             setError("You're not signed in. Open the app again.")

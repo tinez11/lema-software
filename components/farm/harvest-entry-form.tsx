@@ -104,6 +104,13 @@ export function HarvestEntryForm({
           case "invalid":
             setFeedback({ kind: "blocked", message: result.message })
             return
+          case "not-assigned":
+            setFeedback({
+              kind: "blocked",
+              message:
+                "You're not assigned to Land & Produce. Ask the owner if that's wrong.",
+            })
+            return
           case "not-allowed":
             setFeedback({
               kind: "blocked",

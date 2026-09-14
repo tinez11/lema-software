@@ -43,6 +43,20 @@ export function moduleDefinition(value: Module): ModuleDefinition {
 }
 
 /**
+ * Whether an assignment covers a module.
+ *
+ * The single definition of "empty means all", so the nav and the
+ * authorization check in `lib/auth/roles.ts` can never drift into disagreeing
+ * about who may reach what.
+ */
+export function isModuleAssigned(
+  assignedModules: readonly Module[],
+  module: Module
+): boolean {
+  return assignedModules.length === 0 || assignedModules.includes(module)
+}
+
+/**
  * The modules a user is offered.
  *
  * An **empty** assignment means all of them. That is what makes the column
@@ -56,7 +70,7 @@ export function moduleDefinition(value: Module): ModuleDefinition {
 export function modulesFor(
   assignedModules: readonly Module[]
 ): readonly ModuleDefinition[] {
-  if (assignedModules.length === 0) return MODULES
-
-  return MODULES.filter((module) => assignedModules.includes(module.value))
+  return MODULES.filter((module) =>
+    isModuleAssigned(assignedModules, module.value)
+  )
 }

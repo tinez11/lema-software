@@ -1,6 +1,7 @@
 "use client"
 
 import { formatCents } from "@/lib/money"
+import { MIN_SALE_QUANTITY } from "@/lib/shop-config"
 import { cn } from "@/lib/utils"
 
 // The quick-add grid at the top of the till: one tile per item, tap to put one
@@ -57,7 +58,9 @@ export function StockItemGrid({
         // What is left once the current sale is accounted for. The server
         // still refuses an oversell — this only stops the till offering one.
         const remaining = item.quantity - (inCart[item.id] ?? 0)
-        const soldOut = remaining < 1
+        // Not `< 1`: goods sold by weight leave fractions behind, and half a
+        // kilo is still a sale. The line is the smallest the server accepts.
+        const soldOut = remaining < MIN_SALE_QUANTITY
 
         return (
           <button
@@ -79,7 +82,9 @@ export function StockItemGrid({
                 {formatCents(item.unitPriceCents)}
               </span>
               <span className="text-sm text-muted-foreground">
-                {soldOut ? "none left" : `${remaining} ${item.unit}`}
+                {soldOut
+                  ? "none left"
+                  : `${Number(remaining.toFixed(2))} ${item.unit}`}
               </span>
             </span>
           </button>

@@ -8,6 +8,8 @@ import type { CropCycleOption } from "@/components/farm/harvest-entry-form"
 import { HarvestHistoryList } from "@/components/farm/harvest-history-list"
 import { ModuleNav } from "@/components/farm/module-nav"
 import type { HarvestHistoryEntry } from "@/components/farm/harvest-history-list"
+import { AuthNotice } from "@/components/farm/auth-notice"
+import { requireModule } from "@/lib/auth/roles"
 import { resolveAuthGate } from "@/lib/auth/session"
 import { farmDate, toDateInputValue } from "@/lib/db/dates"
 import {
@@ -58,6 +60,17 @@ export default async function LandPage() {
   // The route-group layout has already redirected or explained every other
   // state; this narrows the type rather than re-deciding anything.
   if (gate.state !== "ready") return null
+
+  // A worker narrowed away from this module cannot reach it by typing the URL
+  // either — the action refuses the write, and this refuses the read.
+  if (!requireModule(gate, "LAND").ok) {
+    return (
+      <AuthNotice title="Not your module">
+        You&apos;re not assigned to Land &amp; Produce. Ask the owner if that&apos;s
+        wrong — they set who works on what.
+      </AuthNotice>
+    )
+  }
 
   const owner = gate.user.role === "OWNER"
   const today = farmDate()

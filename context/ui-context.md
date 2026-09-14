@@ -98,10 +98,22 @@ defaults to next-themes' `system`.
 - **Shop / POS screen**: a tappable item grid for quick-add, a running
   "current sale" summary panel with per-line quantity steppers, and a
   sticky, high-contrast checkout button at the bottom.
-- **Worker entry screens**: no dashboard, no tabs, no module
-  switching — the app opens directly to the one task the worker is
-  assigned. Large stepper controls, one primary action button, and a
-  visible "saved locally" sync-status indicator at all times.
+- **Worker entry screens**: no dashboard and no tabs — the app opens
+  directly onto a task, with large stepper controls and one primary
+  action button. A "saved locally" sync-status indicator belongs here
+  too and is not built yet (open question 14): there is nothing local to
+  save to until PowerSync lands.
+
+  On module switching this originally said "none", and that is no longer
+  what the app does. `User.assignedModules` decides: a worker assigned
+  one module sees no switcher, which is the original intent; a worker
+  assigned several — including the empty assignment every row currently
+  has, which means all three — gets the ruled-off "Other modules" group
+  described below. The list is the way it stays honest, because nothing
+  yet lets an owner narrow anyone (open question 19), so "no module
+  switching" would have meant "no way to reach two of the three write
+  paths". Assignment is enforced, not decorative: `requireModule()`
+  refuses the page and the action, not just the link.
 - Owner-facing screens may use a softer, layered visual treatment;
   worker-facing screens stay flat and high-contrast, since speed and
   outdoor legibility matter more than mood there.

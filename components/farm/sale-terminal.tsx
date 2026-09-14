@@ -74,17 +74,27 @@ export function SaleTerminal({ items, treatment }: SaleTerminalProps) {
     [cart]
   )
 
-  /** Tapping a tile adds one, or bumps the line that is already on the sale. */
+  /**
+   * Tapping a tile adds one, or bumps the line already on the sale.
+   *
+   * Clamped to what is actually on the shelf and to the per-line ceiling, the
+   * same bounds the stepper below already enforces — otherwise tapping a tile
+   * could build a line the server was always going to refuse. Clamping also
+   * covers loose goods: with 0.5 kg left, a tap adds 0.5, not 1.
+   */
   function add(item: SellableItem) {
     setFeedback({ kind: "idle" })
     setCart((current) => {
+      const ceiling = Math.min(MAX_SALE_QUANTITY, item.quantity)
       const existing = current.find((line) => line.item.id === item.id)
 
-      if (!existing) return [...current, { item, quantity: 1 }]
+      if (!existing) {
+        return [...current, { item, quantity: Math.min(1, ceiling) }]
+      }
 
       return current.map((line) =>
         line.item.id === item.id
-          ? { ...line, quantity: line.quantity + 1 }
+          ? { ...line, quantity: Math.min(line.quantity + 1, ceiling) }
           : line
       )
     })
@@ -159,6 +169,13 @@ export function SaleTerminal({ items, treatment }: SaleTerminalProps) {
             return
           case "invalid":
             setFeedback({ kind: "blocked", message: result.message })
+            return
+          case "not-assigned":
+            setFeedback({
+              kind: "blocked",
+              message:
+                "You're not assigned to the Shop. Ask the owner if that's wrong.",
+            })
             return
           case "not-allowed":
             setFeedback({
@@ -305,7 +322,7 @@ function FeedbackNote({
         />
       )}
       {feedback.kind === "offline"
-        ? "No connection — the sale wasn't recorded, and no stock was taken off. Ring it again once you're back online."
+        ? "No connection — the sale may not have gone through. Check the recent sales list before ringing it again, so it isn't recorded twice."
         : feedback.message}
     </p>
   )

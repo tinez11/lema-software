@@ -3,7 +3,7 @@
 import { refresh } from "next/cache"
 import { z } from "zod"
 
-import { requireOwner } from "@/lib/auth/roles"
+import { requireModule, requireOwner } from "@/lib/auth/roles"
 import { resolveAuthGate } from "@/lib/auth/session"
 import { createStockItem, recordSale } from "@/lib/db/shop"
 import {
@@ -85,6 +85,7 @@ export type RecordSaleResult =
     }
   | { status: "invalid"; message: string }
   | { status: "not-allowed" }
+  | { status: "not-assigned" }
 
 /** The first validation message, which is the one worth showing on a till. */
 function firstIssue(error: z.ZodError): string {
@@ -135,9 +136,11 @@ export async function createStockItemAction(
 export async function recordSaleAction(
   input: RecordSaleInput
 ): Promise<RecordSaleResult> {
-  const gate = await resolveAuthGate()
+  // `createStockItemAction` needs no module check: `requireOwner` already
+  // guarantees an owner, and owners are never module-restricted.
+  const caller = requireModule(await resolveAuthGate(), "SHOP")
 
-  if (gate.state !== "ready") return { status: "not-allowed" }
+  if (!caller.ok) return { status: caller.status }
 
   const parsed = recordSaleSchema.safeParse(input)
 
@@ -150,7 +153,7 @@ export async function recordSaleAction(
       stockItemId: line.stockItemId,
       quantity: roundSaleQuantity(line.quantity),
     })),
-    gate.user.id
+    caller.user.id
   )
 
   if (!result.ok) {

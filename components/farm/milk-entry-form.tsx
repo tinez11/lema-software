@@ -38,6 +38,13 @@ type MilkEntryFormProps = {
   loggedSessions: readonly MilkSession[]
 }
 
+/**
+ * The milk entry form, for both roles.
+ *
+ * `treatment` selects the density from `ui-context.md`'s owner/worker table —
+ * panel edge, padding and button width — and nothing else. What the form does,
+ * and what the server will accept, is identical for both.
+ */
 export function MilkEntryForm({
   treatment,
   dateLabel,
@@ -55,6 +62,7 @@ export function MilkEntryForm({
   // a milking. The server draws the same line, in `lib/milk-config.ts`.
   const ready = liters >= MIN_MILK_LITERS
 
+  /** Sends the entry and turns each typed result into something to read. */
   function save() {
     if (!ready || pending) return
 
@@ -83,6 +91,13 @@ export function MilkEntryForm({
             return
           case "invalid":
             setFeedback({ kind: "blocked", message: result.message })
+            return
+          case "not-assigned":
+            setFeedback({
+              kind: "blocked",
+              message:
+                "You're not assigned to Cows & Milk. Ask the owner if that's wrong.",
+            })
             return
           case "not-allowed":
             setFeedback({
@@ -184,6 +199,7 @@ export function MilkEntryForm({
   )
 }
 
+/** The one-line result of a save: what happened, and whether it worked. */
 function FeedbackNote({
   feedback,
   worker,

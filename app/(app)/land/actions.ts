@@ -3,7 +3,7 @@
 import { refresh } from "next/cache"
 import { z } from "zod"
 
-import { requireOwner } from "@/lib/auth/roles"
+import { requireModule, requireOwner } from "@/lib/auth/roles"
 import { resolveAuthGate } from "@/lib/auth/session"
 import { farmDate, parseFarmDate } from "@/lib/db/dates"
 import {
@@ -128,6 +128,7 @@ export type LogHarvestResult =
   | { status: "unknown-cycle" }
   | { status: "invalid"; message: string }
   | { status: "not-allowed" }
+  | { status: "not-assigned" }
 
 /**
  * The first validation message from a failed parse.
@@ -203,9 +204,11 @@ export async function createCropCycleAction(
 export async function logHarvestAction(
   input: LogHarvestInput
 ): Promise<LogHarvestResult> {
-  const gate = await resolveAuthGate()
+  // The two `create*` actions above need no module check: `requireOwner`
+  // already guarantees an owner, and owners are never module-restricted.
+  const caller = requireModule(await resolveAuthGate(), "LAND")
 
-  if (gate.state !== "ready") return { status: "not-allowed" }
+  if (!caller.ok) return { status: caller.status }
 
   const parsed = logHarvestSchema.safeParse(input)
 
@@ -220,7 +223,7 @@ export async function logHarvestAction(
     farmDate(),
     quantity,
     parsed.data.unit,
-    gate.user.id
+    caller.user.id
   )
 
   if (!result.ok) return { status: "unknown-cycle" }

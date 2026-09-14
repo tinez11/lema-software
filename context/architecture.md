@@ -190,6 +190,13 @@
   module, deliberately not a dashboard. A module with no screen yet is
   never linked, so assignment can name `SHOP` before Shop exists.
   Owners are unaffected; they see everything.
+
+  **It is a permission, not just a menu.** `requireModule()` in
+  `lib/auth/roles.ts` guards each module's page read and each of its
+  worker-callable actions, so a narrowed worker cannot reach a module by
+  typing its URL or by POSTing to its action. The owner-only actions
+  need no module check of their own: `requireOwner()` already
+  guarantees an owner, and owners are never restricted.
 - **The owner's edit reach is currently the same as a worker's.** The
   ownership check above has no owner branch: an owner can correct their
   own same-day entry and no one else's. Deliberate for now — a helper

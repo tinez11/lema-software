@@ -18,7 +18,34 @@ import "server-only"
  * this runs anywhere but a local machine.
  */
 export function farmDate(at: Date = new Date()): Date {
+  // Idempotent on a value that is already a civil day.
+  //
+  // The local getters below turn an *instant* into the day it falls on where
+  // the server stands. Applied to a value that is already midnight UTC — what
+  // this function and `parseFarmDate()` both return, and what Prisma reads a
+  // `@db.Date` back as — they shift it a day west of Greenwich: 13 September
+  // at 00:00Z is 12 September at 19:00 in UTC-5, so a second pass stores the
+  // 12th. `createCropCycle` did exactly that, normalising a date the action
+  // had already normalised, and would have filed every planting date a day
+  // early on a server anywhere in the Americas.
+  //
+  // The one case this reads differently: `farmDate()` called in the
+  // millisecond of midnight UTC takes the UTC day rather than the local one.
+  // Defensible either way, and vanishingly rare against a bug that would have
+  // been silent and permanent.
+  if (isCivilDay(at)) return new Date(at.getTime())
+
   return new Date(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate()))
+}
+
+/** Whether a value is already exactly midnight UTC, i.e. a canonical day. */
+function isCivilDay(at: Date): boolean {
+  return (
+    at.getUTCHours() === 0 &&
+    at.getUTCMinutes() === 0 &&
+    at.getUTCSeconds() === 0 &&
+    at.getUTCMilliseconds() === 0
+  )
 }
 
 /**

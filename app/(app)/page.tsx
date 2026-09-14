@@ -8,6 +8,8 @@ import { MilkHistoryList } from "@/components/farm/milk-history-list"
 import type { MilkHistoryEntry } from "@/components/farm/milk-history-list"
 import { WorkerPinList } from "@/components/farm/worker-pin-list"
 import type { CurrentUser } from "@/lib/auth/session"
+import { AuthNotice } from "@/components/farm/auth-notice"
+import { requireModule } from "@/lib/auth/roles"
 import { resolveAuthGate } from "@/lib/auth/session"
 import { farmDate } from "@/lib/db/dates"
 import { getMilkRecordsForDate, getRecentMilkRecords } from "@/lib/db/milk"
@@ -87,6 +89,18 @@ export default async function Home() {
   // The route-group layout has already redirected or explained every other
   // state; this narrows the type rather than re-deciding anything.
   if (gate.state !== "ready") return null
+
+  // Home is the milk screen, so it carries the same module check as the other
+  // two. A worker narrowed away from Cows & Milk lands here with nothing to
+  // show — the nav below points them at whatever they *are* assigned to.
+  if (!requireModule(gate, "MILK").ok) {
+    return (
+      <AuthNotice title="Not your module">
+        You&apos;re not assigned to Cows &amp; Milk. Ask the owner if
+        that&apos;s wrong — they set who works on what.
+      </AuthNotice>
+    )
+  }
 
   return gate.user.role === "OWNER" ? (
     <OwnerMilkHome user={gate.user} />
