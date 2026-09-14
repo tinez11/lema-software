@@ -7,6 +7,7 @@ import {
   clearPinHash,
   getUserById,
   setPinHash,
+  setWorkerActive,
   verifyPinHash,
 } from "@/lib/db/users"
 
@@ -24,6 +25,14 @@ export type PinActionResult =
   | { status: "locked"; lockedUntilIso: string }
   | { status: "not-allowed" }
 
+/**
+ * A worker choosing their PIN for the first time.
+ *
+ * Refuses anyone who is not an active worker without one — inactive included,
+ * so a pending account cannot set a PIN by POSTing here and skip the owner's
+ * approval. Setting a PIN also unlocks: they just proved they are at the
+ * device.
+ */
 export async function setPinAction(pin: string): Promise<PinActionResult> {
   const { userId } = await auth()
 
@@ -52,6 +61,12 @@ export async function setPinAction(pin: string): Promise<PinActionResult> {
   return { status: "ok" }
 }
 
+/**
+ * Checks a PIN against the stored hash and unlocks the session on a match.
+ *
+ * The verdict — wrong, locked, or an inactive account — comes from
+ * `verifyPinHash`, which owns the attempt count. Nothing here decides it.
+ */
 export async function unlockAction(pin: string): Promise<PinActionResult> {
   const { userId } = await auth()
 
@@ -115,4 +130,50 @@ export async function resetWorkerPinAction(
   revalidatePath("/")
 
   return { status: "ok" }
+}
+
+export type WorkerAccessResult =
+  | { status: "ok"; active: boolean }
+  | { status: "not-allowed" }
+
+/**
+ * Owner-only: grants or withdraws a worker's access to the farm's data.
+ *
+ * This is the approval half of default-deny. The Clerk webhook creates every
+ * new account inactive, because a Clerk account existing is not authorisation
+ * — Clerk's hosted sign-up page is reachable independently of this app, so
+ * without this step anyone who found it could sign up, pick a PIN and reach
+ * the till. Access now requires a deliberate act by someone who already has
+ * it.
+ *
+ * The caller's identity is re-read from Clerk, never taken from a prop, so a
+ * worker cannot approve themselves by POSTing to this action directly — which
+ * would defeat the entire point of it.
+ *
+ * Only a `WORKER` is switchable. An owner cannot revoke another owner here,
+ * and cannot revoke themselves into a farm with nobody who can let anyone
+ * back in.
+ */
+export async function setWorkerAccessAction(
+  workerId: string,
+  active: boolean
+): Promise<WorkerAccessResult> {
+  const { userId } = await auth()
+
+  if (!userId) return { status: "not-allowed" }
+
+  const caller = await getUserById(userId)
+
+  if (!caller || !caller.active || caller.role !== "OWNER") {
+    return { status: "not-allowed" }
+  }
+
+  const target = await getUserById(workerId)
+
+  if (!target || target.role !== "WORKER") return { status: "not-allowed" }
+
+  const updated = await setWorkerActive(workerId, active)
+  revalidatePath("/")
+
+  return { status: "ok", active: updated.active }
 }

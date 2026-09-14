@@ -23,10 +23,16 @@
 - `components/farm/` — custom composed components shared across
   modules (metric cards, the "needs attention" list, quantity
   steppers, etc.), plus the module-specific screens composed from them.
-  `quantity-stepper.tsx` is the genuinely shared one — a harvest weight
-  and a stock count are the same control — while `session-toggle.tsx`,
-  `milk-entry-form.tsx` and `milk-history-list.tsx` belong to Cows &
-  Milk, the way `pin-pad.tsx` belongs to auth
+  `quantity-stepper.tsx` and `choice-grid.tsx` are the genuinely shared
+  ones — a harvest weight and a stock count are the same control, and a
+  small fixed choice is a row of cells whatever it is choosing between.
+  Everything else is module-specific the way `pin-pad.tsx` belongs to
+  auth: `session-toggle.tsx`, `milk-entry-form.tsx` and
+  `milk-history-list.tsx` to Cows & Milk; `harvest-entry-form.tsx`,
+  `harvest-history-list.tsx`, `field-form.tsx` and `crop-cycle-form.tsx`
+  to Land & Produce; `sale-terminal.tsx`, `stock-item-grid.tsx`,
+  `stock-item-form.tsx` and `sales-history-list.tsx` to Shop.
+  `module-nav.tsx` is cross-cutting, like the auth components
 - `lib/utils.ts` — the `cn()` class-merging helper, re-exported from the
   `cn` package (shadcn's drop-in replacement for `clsx` +
   `tailwind-merge`)
@@ -34,11 +40,33 @@
   functions (`animals.ts`, `milk.ts`, `land.ts`, `shop.ts`), server-only.
   Every file in here starts with `import "server-only"`, so importing one
   from a client component is a build error rather than a runtime leak.
-- `lib/milk-config.ts` — the bounds of a herd-total entry (minimum,
-  ceiling, stepper increment, decimal places) and the rounding both
-  sides apply. Not `server-only`, for the same reason as
-  `pin-config.ts`: the stepper is a client component and must offer
-  exactly the range the server action accepts
+- `lib/milk-config.ts`, `lib/land-config.ts`, `lib/shop-config.ts` — per-module entry bounds
+  (minimum, ceiling, stepper increment, decimal places) and the rounding
+  both sides apply; `land-config.ts` also carries the fixed set of
+  harvest units, because `HarvestRecord.unit` is a free `String` in the
+  schema and `sumHarvestQuantity()` groups by it. Neither is
+  `server-only`, for the same reason as `pin-config.ts`: the entry
+  controls are client components and must offer exactly the range the
+  server action accepts
+- `lib/db/dates.ts` — `farmDate()`, `parseFarmDate()` and
+  `toDateInputValue()`, the only conversions between a clock instant, a
+  `YYYY-MM-DD` form value, and the `@db.Date` civil day a record is
+  filed under. Shared by every module with a date column rather than
+  reimplemented per module
+- `lib/db/money.ts` — `toCents()` / `fromCents()`, the only conversion
+  between a Postgres `Decimal(10, 2)` and the integer cents money
+  travels in everywhere above `lib/db/`. Same role as `dates.ts`: one
+  conversion, both directions, no second definition anywhere
+- `lib/money.ts` — `formatCents()`, the other half of the pair and the
+  only place cents become a readable amount. Separate from
+  `lib/db/money.ts` because that one is `server-only` (it touches
+  `Prisma.Decimal`) while this has to run in the browser, where the till
+  recalculates a running total on every tap. The split is the
+  convert-at-the-boundary / format-at-render rule made structural
+- `lib/modules.ts` — the three business lines, their routes and their
+  accents, plus `modulesFor()`, which turns a user's `assignedModules`
+  into the screens they are offered. Not `server-only`: it holds no
+  query, and a client component needs the same list
 - `lib/sync/` — PowerSync client setup and sync rule configuration
 - `lib/auth/` — Clerk configuration and the PIN-unlock layer that
   switches between already-authenticated worker profiles on a shared
@@ -53,6 +81,11 @@
     ready
   - `actions.ts` — the three server actions of the PIN flow, each
     re-reading the caller's identity from Clerk rather than a client prop
+  - `roles.ts` — `requireOwner()`, which narrows a resolved gate to a
+    signed-in, unlocked owner. Kept out of `session.ts` because that
+    module imports Clerk's `auth()` at the top level and so cannot load
+    outside a request; `roles.ts` is pure, which is what makes the rule
+    testable directly instead of only through a live session
 - `proxy.ts` — `clerkMiddleware` at the project root. Next 16 renamed
   `middleware.ts` to `proxy.ts`; everything is protected except
   `/sign-in`, `/signed-out`, `/__clerk/*` and the Clerk webhook
@@ -65,13 +98,14 @@
   apply the gate again. `app/(app)/page.tsx` routes on role: a worker
   lands on the milk entry screen itself, an owner on the Cows & Milk
   module home
-- `app/(app)/milk/actions.ts` — the module's server actions. A module's
-  writes live in an `actions.ts` beside its route rather than in
-  `lib/db/`, because this is where the caller's identity is resolved
-  (from Clerk, never from a prop) and its input validated with `zod`
-  before a query helper is reached. The folder holds no `page.tsx`: the
-  screens are reached through `/`, not `/milk`, until there is more than
-  one module to switch between
+- `app/(app)/milk/actions.ts`, `app/(app)/land/`, `app/(app)/shop/` — each module's server
+  actions. A module's writes live in an `actions.ts` beside its route
+  rather than in `lib/db/`, because this is where the caller's identity
+  is resolved (from Clerk, never from a prop) and its input validated
+  with `zod` before a query helper is reached. `milk/` holds no
+  `page.tsx` — its screens are reached through `/`, which is still where
+  both roles land; `land/` and `shop/` have one each, at `/land` and
+  `/shop`
 - `app/lock/`, `app/set-pin/` — outside that group on purpose: a locked
   worker has to be able to reach the screen the group redirected them to
 - `app/api/webhooks/clerk/` — creates the Prisma `User` row on
@@ -103,10 +137,30 @@
   the identity of a record. Prisma reads one back as midnight UTC, so
   every date written has to be built the same way or "today" never
   compares equal to a stored date and the constraint guards the wrong
-  thing. `farmDate()` in `lib/db/milk.ts` is that one conversion, and
-  every screen formats those dates back with `timeZone: "UTC"`. Which
-  civil day it is still comes from the *server's* clock — see open
-  question 12.
+  thing. `farmDate()` in `lib/db/dates.ts` is that one conversion,
+  shared by every module with a date column — `CropCycle`,
+  `HarvestRecord` and `InputRecord` all have one — and every screen
+  formats those dates back with `timeZone: "UTC"`. Which civil day it is
+  still comes from the *server's* clock — see open question 12.
+- **Money is stored as `Decimal(10, 2)` and travels as integer cents.**
+  Postgres holds the exact decimal; everything above `lib/db/` — server
+  components, actions, client components — sees a whole number of cents
+  (1250, not 12.5 and not "12.50"). A `Decimal` cannot be serialised
+  into a client component at all, and a string cannot be arithmetic
+  without being parsed back into a float, which is exactly the precision
+  problem the column exists to prevent — and the POS screen recalculates
+  quantity × price on every stepper tap. Integer cents are exact at any
+  scale this farm will see. `toCents()` / `fromCents()` in
+  `lib/db/money.ts` are the only conversion, reads and writes both, and
+  every cents value is named for its unit (`unitPriceCents`,
+  `totalAmountCents`, `costCents`, `subtotalCents`). Formatting happens
+  at final render and nowhere else.
+- **Registry data carries no attribution; transactional data does.**
+  Every record entered in the course of a day has an `enteredById` /
+  `recordedById`. `Field` is the one model in the schema without one —
+  it is reference data the owner sets up, not something logged — so
+  `createField()` has no owner id to store. Owner-only creation is
+  still enforced, in the action, by `requireOwner()`.
 
 ## Auth and Access Model
 
@@ -126,6 +180,23 @@
   else is a typed `not-yours` / `too-old`, never a thrown error. Each
   module's write helper repeats that check rather than sharing a
   permission layer, so the rule is greppable per model.
+- **A worker is assigned to modules, and an empty assignment means all
+  of them.** `User.assignedModules` is a `Module[]` (`MILK` / `LAND` /
+  `SHOP`) defaulting to `[]`. Empty is read as "all three", which is
+  what makes the column additive: every row that predates it keeps full
+  access, and narrowing a worker to one business line is a data change,
+  not a code change. `lib/modules.ts` is where that is interpreted, and
+  `components/farm/module-nav.tsx` is what renders it — one link per
+  module, deliberately not a dashboard. A module with no screen yet is
+  never linked, so assignment can name `SHOP` before Shop exists.
+  Owners are unaffected; they see everything.
+
+  **It is a permission, not just a menu.** `requireModule()` in
+  `lib/auth/roles.ts` guards each module's page read and each of its
+  worker-callable actions, so a narrowed worker cannot reach a module by
+  typing its URL or by POSTing to its action. The owner-only actions
+  need no module check of their own: `requireOwner()` already
+  guarantees an owner, and owners are never restricted.
 - **The owner's edit reach is currently the same as a worker's.** The
   ownership check above has no owner branch: an owner can correct their
   own same-day entry and no one else's. Deliberate for now — a helper
@@ -146,17 +217,35 @@
   and has not unlocked yet this session sees an explicit offline message
   rather than a silent failure. Work already entered is unaffected — it
   is queued locally and syncs later.
-- **There is no in-app sign-up.** Accounts are created by the owner in
-  the Clerk dashboard, and the webhook makes every new Clerk user a
-  `WORKER` — so an open sign-up page is a self-enrolment route into farm
-  data. The scaffolded `/sign-up` route was removed and is not a public
-  route. This closes the app's own front door; the matching **deployment
-  requirement** is to restrict sign-ups on the Clerk instance itself
-  (dashboard → restrictions), because Clerk's hosted sign-up page is
-  reachable independently of this app. The Clerk backend SDK cannot read
-  that setting back — `InstanceAPI` exposes only `get()` (id,
-  environment, allowed origins) and a write-only `updateRestrictions()`
-  — so it cannot be asserted at boot and has to be checked by a human.
+- **A Clerk account is not authorisation. Access is default-deny.** The
+  webhook creates every new user as a `WORKER` with `active: false`, and
+  `resolveAuthGate()` refuses an inactive user before any role, PIN or
+  data check. The owner grants access explicitly from their home screen
+  (`setWorkerAccessAction`, owner-only, server-checked).
+
+  This replaces an earlier, weaker arrangement that relied on removing
+  the in-app `/sign-up` route. That route is still gone and should stay
+  gone, but removing it never closed the door: Clerk's hosted sign-up
+  page is reachable independently of this app, `<SignIn />` even links
+  to it, and the webhook then handed anyone who used it a live `WORKER`
+  row. They could set their own PIN and reach the till. The mistake was
+  treating "a Clerk account exists" as "this person works here".
+
+  The matching **deployment requirement** still stands and is now
+  defence in depth rather than the only defence: restrict sign-ups on
+  the Clerk instance (dashboard → restrictions), so unwanted accounts
+  are never created at all. The Clerk backend SDK cannot read that
+  setting back — `InstanceAPI` exposes only `get()` (id, environment,
+  allowed origins) and a write-only `updateRestrictions()` — so it
+  cannot be asserted at boot and has to be checked by a human. That
+  unverifiable-from-code property is exactly why the app no longer
+  depends on it.
+- **Inactive means two different things, and they get different
+  screens.** A row that has never set a PIN has never been in, so it is
+  *pending* and sees "Waiting for approval". One that has is *revoked*
+  and is told so. `setWorkerActive()` therefore never clears
+  `pinSetAt` — wiping it would make every revoked worker look like a new
+  one. Clearing a PIN is `resetWorkerPinAction`'s job, separately.
 - **A forgotten PIN is reset by the owner, never by the worker.** Anyone
   sitting at a locked screen already holds a cached Clerk session on
   that device — precisely the case the PIN exists to stop — so a
@@ -185,13 +274,36 @@
    verified `role === OWNER`. A helper must never accept a role
    parameter and branch internally — the safe and privileged paths
    stay two distinct, greppable exports.
+
+   **One deliberate carve-out: `getStockItemsForSale()`.** It is a safe
+   export and it returns a selling price, because a till cannot ring up
+   a sale without one — the worker is reading that price aloud to the
+   customer as they serve them. What the invariant protects is the
+   owner's commercial position: what stock *cost*, what margin it
+   carries, what the shop has *taken*. None of those appear there, and
+   nothing in that helper aggregates. Any further exception needs the
+   same test — a per-item shelf price the worker already knows is not
+   the same class of fact as a total — and needs recording here rather
+   than decided at a call site.
 3. The Shop module has no automatic data dependency on Cows & Milk or
    Land & Produce — no code path may read milk or harvest records to
    affect shop stock. Restocking the shop is always a manual, explicit
    action.
-4. Stock quantity must never go negative. A conflicting offline sale
-   that would push a `StockItem` below zero is flagged for owner
-   review at sync time rather than silently applied.
+4. Stock quantity must never go negative. Enforced by the database,
+   not by a check in application code: `recordSale()` decrements each
+   line with a conditional `updateMany` carrying
+   `quantity: { gte: requested }`, so the read and the write are a
+   single statement holding a single row lock, and the whole sale runs
+   in one transaction. A read-then-write lets two tills both see six
+   bags, both decide four is fine, and both commit. Measured against
+   this database: ten concurrent sales of two units against ten in
+   stock left **8** under read-then-write — nine of the ten decrements
+   lost — and exactly **0** under the conditional update, with five
+   sales succeeding and five refused. A refusal is the typed
+   `insufficient-stock` result, never a thrown error, and no part of a
+   failed sale is written. A conflicting *offline* sale is a separate
+   case and still belongs to the PowerSync work: it is flagged for
+   owner review at sync time rather than silently applied.
 5. All Prisma/Postgres writes happen only on the server (route
    handlers or server actions). The client never talks to Postgres
    directly — on-device writes go through the local SQLite/PowerSync

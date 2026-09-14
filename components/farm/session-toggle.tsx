@@ -1,29 +1,23 @@
 "use client"
 
-import { useId } from "react"
-import { CheckIcon, MoonIcon, SunriseIcon } from "lucide-react"
-import type { LucideIcon } from "lucide-react"
+import { MoonIcon, SunriseIcon } from "lucide-react"
 import type { MilkSession } from "@prisma/client"
 
-import { cn } from "@/lib/utils"
+import { ChoiceGrid } from "@/components/farm/choice-grid"
+import type { ChoiceOption } from "@/components/farm/choice-grid"
 
 // Which milking a herd total belongs to. Two options and no third, ever —
 // `MilkSession` is a closed enum and invariant 1 makes the pair (date, session)
 // the identity of a record, so this is a choice, not a filter.
 //
-// Native radios under the surface rather than buttons with `role="radio"`:
-// arrow-key movement, the checked state and the accessible group all come for
-// free, and the label is what gets the worker-sized 56px target.
+// The cells themselves are `ChoiceGrid`; what lives here is the milk-specific
+// half: the two sessions, their icons, and the words for them.
 //
 // `MilkSession` is imported as a *type* only. Pulling the runtime enum object
 // out of `@prisma/client` here would drag the Prisma client into the browser
 // bundle.
 
-const SESSIONS: readonly {
-  value: MilkSession
-  label: string
-  Icon: LucideIcon
-}[] = [
+const SESSIONS: readonly ChoiceOption<MilkSession>[] = [
   { value: "MORNING", label: "Morning", Icon: SunriseIcon },
   { value: "EVENING", label: "Evening", Icon: MoonIcon },
 ]
@@ -46,6 +40,11 @@ type SessionToggleProps = {
   className?: string
 }
 
+/**
+ * Morning or evening, for a herd-total entry. A thin wrapper over
+ * `ChoiceGrid` — the cells, radios and accent live there; what is here is the
+ * milk-specific half.
+ */
 export function SessionToggle({
   value,
   onValueChange,
@@ -53,49 +52,17 @@ export function SessionToggle({
   disabled = false,
   className,
 }: SessionToggleProps) {
-  // One radio group per instance, so two forms on a page never share a name.
-  const groupName = useId()
-
   return (
-    <fieldset
+    <ChoiceGrid
+      value={value}
+      onValueChange={onValueChange}
+      options={SESSIONS}
+      legend="Milking session"
+      markedValues={loggedSessions}
+      markLabel="Already logged"
+      accent="moss"
       disabled={disabled}
-      className={cn("grid grid-cols-2 gap-3", className)}
-    >
-      <legend className="sr-only">Milking session</legend>
-
-      {SESSIONS.map(({ value: session, label, Icon }) => {
-        const logged = loggedSessions.includes(session)
-
-        return (
-          <label key={session} className="cursor-pointer">
-            <input
-              type="radio"
-              name={groupName}
-              value={session}
-              checked={value === session}
-              onChange={() => onValueChange(session)}
-              className="peer sr-only"
-            />
-            <span
-              className={cn(
-                "flex h-14 items-center justify-center gap-2 rounded-xl border-2 border-border bg-card text-lg font-semibold text-foreground transition-colors",
-                "peer-checked:border-moss peer-checked:bg-moss peer-checked:text-moss-foreground",
-                "peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50",
-                "peer-disabled:cursor-not-allowed peer-disabled:opacity-50"
-              )}
-            >
-              <Icon className="h-5 w-5" aria-hidden />
-              {label}
-              {logged && (
-                <CheckIcon
-                  className="h-4 w-4 opacity-70"
-                  aria-label="Already logged"
-                />
-              )}
-            </span>
-          </label>
-        )
-      })}
-    </fieldset>
+      className={className}
+    />
   )
 }

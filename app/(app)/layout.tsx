@@ -8,6 +8,14 @@ import { resolveAuthGate } from "@/lib/auth/session"
 // Every real app screen lives under this group, so the gate is applied once
 // here rather than remembered page by page. `proxy.ts` has already guaranteed
 // a Clerk session; what this adds is the Prisma row and the PIN.
+/**
+ * Applies the auth gate once for every screen in the group.
+ *
+ * Each state resolves to exactly one outcome: a redirect for the two the user
+ * can act on themselves, a notice for the three they cannot, and the children
+ * only for `ready`. No page underneath re-decides any of it — they narrow the
+ * type and trust this.
+ */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const gate = await resolveAuthGate()
 
@@ -31,6 +39,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           <p className="mt-4 text-sm">
             Your account id:{" "}
             <code className="font-mono break-all">{gate.clerkUserId}</code>
+          </p>
+        </AuthNotice>
+      )
+    case "needs-approval":
+      return (
+        <AuthNotice title="Waiting for approval">
+          <p>
+            Your account exists, but the farm owner hasn&apos;t given it access
+            yet. Nothing here is available until they do.
+          </p>
+          <p className="mt-4 text-sm">
+            If you weren&apos;t expecting this, you don&apos;t have an account
+            on this farm — signing up on your own doesn&apos;t grant access.
           </p>
         </AuthNotice>
       )

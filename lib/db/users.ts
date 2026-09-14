@@ -28,12 +28,24 @@ const userSafeSelect = {
   pinSetAt: true,
   pinFailedAttempts: true,
   pinLockedUntil: true,
+  assignedModules: true,
 } satisfies Prisma.UserSelect
 
+/**
+ * One user by their Clerk id, or null if the webhook has not created the row
+ * yet. Never selects `pinHash` — see the note above (invariant 6).
+ */
 export function getUserById(id: string) {
   return prisma.user.findUnique({ where: { id }, select: userSafeSelect })
 }
 
+/**
+ * Users by name. Narrow to one role, or to active accounts only.
+ *
+ * `activeOnly` is opt-in rather than the default because the owner's screens
+ * need to see a revoked worker in order to say so; anything acting *on behalf
+ * of* a user should pass it.
+ */
 export function getUsers(options: { role?: Role; activeOnly?: boolean } = {}) {
   const { role, activeOnly } = options
 
@@ -48,15 +60,51 @@ export function getUsers(options: { role?: Role; activeOnly?: boolean } = {}) {
 }
 
 /**
- * Called by the Clerk webhook on `user.created`. Upserted rather than created
- * because Clerk retries a webhook it did not get a 2xx for, and a retry must
- * not fail or overwrite a role the owner has since changed.
+ * Called by the Clerk webhook on `user.created`.
+ *
+ * **Creates the row inactive.** A Clerk account existing is not authorisation
+ * to use the farm's data — Clerk's hosted sign-up page is reachable
+ * independently of this app, so anyone who can reach it could otherwise sign
+ * up, be handed a `WORKER` row, choose their own PIN and walk into the till.
+ * Restricting sign-ups on the Clerk instance is still the right thing to do
+ * (see `architecture.md`), but it is one external toggle that this codebase
+ * cannot read back or assert, so the app refuses by default and the owner
+ * approves. Access requires a deliberate act by someone who already has it.
+ *
+ * Upserted rather than created because Clerk retries a webhook it did not get
+ * a 2xx for, and `update: {}` means an existing row always wins — so a
+ * re-delivered `user.created` can never quietly deactivate a worker the owner
+ * has already approved, nor overwrite a role.
  */
 export function upsertUserFromClerk(input: { id: string; name: string }) {
   return prisma.user.upsert({
     where: { id: input.id },
-    create: { id: input.id, name: input.name, role: "WORKER", active: true },
+    create: { id: input.id, name: input.name, role: "WORKER", active: false },
     update: {}, // an existing row wins: role and active are managed in-app
+    select: userSafeSelect,
+  })
+}
+
+/**
+ * Grants or withdraws a worker's access.
+ *
+ * The same switch both ways on purpose: approving someone and revoking them
+ * are one decision with two directions, and an owner who approves the wrong
+ * person needs the way back in the same place they found the way in.
+ *
+ * This writes `active` and nothing else. Deliberately: the PIN is left alone
+ * because `resolveAuthGate()` refuses an inactive user *before* a PIN is ever
+ * checked, so a revoked worker's PIN is already inert — and `pinSetAt` is what
+ * tells a never-approved account apart from a revoked one. Wiping it here
+ * would make every revoked worker look like a pending one and get them the
+ * wrong message. An owner who wants the PIN gone as well has
+ * `resetWorkerPinAction` for exactly that, and re-approving then sends them
+ * back through "choose a PIN".
+ */
+export function setWorkerActive(userId: string, active: boolean) {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { active },
     select: userSafeSelect,
   })
 }

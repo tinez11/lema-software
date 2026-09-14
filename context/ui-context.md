@@ -98,10 +98,22 @@ defaults to next-themes' `system`.
 - **Shop / POS screen**: a tappable item grid for quick-add, a running
   "current sale" summary panel with per-line quantity steppers, and a
   sticky, high-contrast checkout button at the bottom.
-- **Worker entry screens**: no dashboard, no tabs, no module
-  switching — the app opens directly to the one task the worker is
-  assigned. Large stepper controls, one primary action button, and a
-  visible "saved locally" sync-status indicator at all times.
+- **Worker entry screens**: no dashboard and no tabs — the app opens
+  directly onto a task, with large stepper controls and one primary
+  action button. A "saved locally" sync-status indicator belongs here
+  too and is not built yet (open question 14): there is nothing local to
+  save to until PowerSync lands.
+
+  On module switching this originally said "none", and that is no longer
+  what the app does. `User.assignedModules` decides: a worker assigned
+  one module sees no switcher, which is the original intent; a worker
+  assigned several — including the empty assignment every row currently
+  has, which means all three — gets the ruled-off "Other modules" group
+  described below. The list is the way it stays honest, because nothing
+  yet lets an owner narrow anyone (open question 19), so "no module
+  switching" would have meant "no way to reach two of the three write
+  paths". Assignment is enforced, not decorative: `requireModule()`
+  refuses the page and the action, not just the link.
 - Owner-facing screens may use a softer, layered visual treatment;
   worker-facing screens stay flat and high-contrast, since speed and
   outdoor legibility matter more than mood there.
@@ -150,18 +162,63 @@ gain.
   inside the trailing edge in muted type. The field is typeable, not
   only tappable: 40 liters is 80 taps otherwise. Unaware of milk, so a
   harvest weight and a stock count reuse it as-is.
-- **Session toggle** (`components/farm/session-toggle.tsx`) — two
-  equal `h-14` cells in a `grid-cols-2`. Selected is a filled
-  `bg-moss` / `text-moss-foreground` cell, which is the module accent
-  doing the job it is defined for. Native radios sit under the labels,
-  so arrow keys, the checked state and the group name come for free.
-  A session already logged for the day carries a check mark rather
-  than being disabled — the clash is worth seeing before the tap, but
-  the server is what refuses it.
+- **Choice grid** (`components/farm/choice-grid.tsx`) — one `h-14` cell
+  per option in a 2-, 3- or 4-column grid. Selected is a filled cell in
+  the module's accent (`accent="moss" | "gold" | "ochre"`), which is
+  those colours doing the job they are defined for. Native radios sit
+  under the labels, so arrow keys, the checked state and the group name
+  come for free. An option can carry a check mark — already logged,
+  already used — rather than being disabled: the clash is worth seeing
+  before the tap, but the server is what refuses it.
+  `session-toggle.tsx` is the Cows & Milk instance of it, adding the two
+  sessions and their icons; the harvest unit picker is another.
 
 A choice with a small, fixed set of options gets one cell per option at
 full width, never a `Select`: a dropdown on a phone costs two taps and
 hides the options until the first one.
+
+A choice whose set **grows with the farm** — a crop cycle picker, later
+a stock item — does get a `Select`, at `h-14` with a 2px edge so it
+still matches the row it sits in. The line is whether the options are
+knowable in advance, not how many there happen to be today.
+
+## Navigation vs. Content
+
+Cross-module navigation is **ruled off and labelled**, never another card
+in the same stack.
+
+A nav row and a data row are the same shape — a bordered panel on a
+card fill — so stacking them in one column with one gap makes leaving
+the screen look like more of the screen. On the milk entry screen that
+put "Morning" and "Evening" directly above "Land & Produce" and "Shop"
+with nothing to tell them apart.
+
+`components/farm/module-nav.tsx` therefore renders as its own group:
+
+| | Owner | Worker |
+| --- | --- | --- |
+| Separator | `border-t` (1px) `--border-default` | `border-t-2` (2px) |
+| Space above the rule | `mt-2`, on top of the page's `gap-6` | `mt-4`, on top of the page's `gap-8` |
+| Space below the rule | `pt-6` | `pt-8` |
+| Heading | "Other modules", `text-sm` muted | same, `text-base` muted |
+
+The heading is deliberately **quieter** than the section heading above
+it ("Logged today" is `text-lg font-semibold`): it labels a way out of
+the screen, not another section of its data. The rule weight follows the
+same logic as panel edges — 2px for a worker, 1px plus shadow for the
+owner.
+
+The separation lives in the component, so every screen that renders it
+inherits it and no page overrides it. Individual rows — icon, label,
+chevron — are unchanged by the grouping.
+
+## Module Accents in Practice
+
+Each module's accent marks its own screens, and the same three roles
+recur: the header eyebrow beside the module icon, the selected cell of a
+choice grid, and the quantity on a history row. Cows & Milk is moss,
+Land & Produce gold, Shop ochre. Rust stays reserved for attention and
+destructive actions and is never a module's colour.
 
 ## Icons
 

@@ -4,12 +4,10 @@ import { MilkSession } from "@prisma/client"
 import { refresh } from "next/cache"
 import { z } from "zod"
 
+import { requireModule } from "@/lib/auth/roles"
 import { resolveAuthGate } from "@/lib/auth/session"
-import {
-  createMilkRecord,
-  farmDate,
-  updateMilkRecord,
-} from "@/lib/db/milk"
+import { farmDate } from "@/lib/db/dates"
+import { createMilkRecord, updateMilkRecord } from "@/lib/db/milk"
 import { getUserById } from "@/lib/db/users"
 import {
   MAX_MILK_LITERS,
@@ -26,9 +24,9 @@ import {
 // counts is the one Clerk answers with. Ownership and the same-day rule are
 // enforced a second time inside `updateMilkRecord` itself.
 //
-// Nothing in this file touches a `Decimal`. `MilkRecord` has no financial
-// column, so open question 6 — how money crosses the server/client boundary —
-// is untouched by this unit and still open for the modules that do have one.
+// Nothing in this file touches money: `MilkRecord` has no financial column.
+// The modules that do have one send integer cents and convert with
+// `fromCents()` before the query — see `lib/db/money.ts`.
 
 const sessionSchema = z.enum(MilkSession)
 
@@ -58,6 +56,7 @@ export type LogMilkResult =
     }
   | { status: "invalid"; message: string }
   | { status: "not-allowed" }
+  | { status: "not-assigned" }
 
 export type EditMilkResult =
   | { status: "ok"; liters: number }
@@ -65,6 +64,7 @@ export type EditMilkResult =
   | { status: "too-old" }
   | { status: "invalid"; message: string }
   | { status: "not-allowed" }
+  | { status: "not-assigned" }
 
 /** The first validation message, which is the one worth showing on a phone. */
 function firstIssue(error: z.ZodError): string {
@@ -83,9 +83,12 @@ function firstIssue(error: z.ZodError): string {
 export async function logMilkAction(
   input: LogMilkInput
 ): Promise<LogMilkResult> {
-  const gate = await resolveAuthGate()
+  // Module access first, before the input is parsed and before any read or
+  // write — a worker narrowed away from Cows & Milk cannot reach this by
+  // POSTing past the screen that no longer links to it.
+  const caller = requireModule(await resolveAuthGate(), "MILK")
 
-  if (gate.state !== "ready") return { status: "not-allowed" }
+  if (!caller.ok) return { status: caller.status }
 
   const parsed = logMilkSchema.safeParse(input)
 
@@ -99,7 +102,7 @@ export async function logMilkAction(
     farmDate(),
     parsed.data.session,
     liters,
-    gate.user.id
+    caller.user.id
   )
 
   if (!result.ok) {
@@ -130,9 +133,9 @@ export async function logMilkAction(
 export async function editMilkAction(
   input: EditMilkInput
 ): Promise<EditMilkResult> {
-  const gate = await resolveAuthGate()
+  const caller = requireModule(await resolveAuthGate(), "MILK")
 
-  if (gate.state !== "ready") return { status: "not-allowed" }
+  if (!caller.ok) return { status: caller.status }
 
   const parsed = editMilkSchema.safeParse(input)
 
@@ -142,7 +145,7 @@ export async function editMilkAction(
 
   const liters = roundLiters(parsed.data.liters)
 
-  const result = await updateMilkRecord(parsed.data.id, liters, gate.user.id)
+  const result = await updateMilkRecord(parsed.data.id, liters, caller.user.id)
 
   if (!result.ok) return { status: result.reason }
 
