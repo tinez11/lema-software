@@ -88,6 +88,17 @@
   decoration — a bare `unitPrice: 1250` reads as 1,250 whole units to
   the next person, and money that is wrong by 100× is the kind of bug
   that reaches a customer.
+- A `create*` helper for a model with a financial column passes an
+  explicit `select` that leaves the column out of what it returns. The
+  row would otherwise carry a `Decimal` that cannot cross into a client
+  component, and the caller already holds the amount it sent.
+- **Never divide a money total by a quantity whose unit is not fixed.**
+  `getCostVsYieldWithFinancials()` reports the cost beside a list of
+  per-unit quantities and never a cost per unit, because a cycle
+  harvested in both kg and crates has no blended figure that means
+  anything — and a ratio computed only when one unit happens to be
+  present is a number that vanishes the first time a second one is
+  logged.
 - **Format only at final render.** Dividing by 100 to display is the
   last thing that happens to a number, never something done before
   storage or in the middle of a calculation. `fromCents()` throws on a

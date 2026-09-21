@@ -296,6 +296,16 @@
    same test — a per-item shelf price the worker already knows is not
    the same class of fact as a total — and needs recording here rather
    than decided at a call site.
+
+   **The write side counts too.** A `create*` helper for a
+   money-bearing model returns a row, and that row carries the
+   financial column unless it is selected around — so
+   `createStockItem()` and `createInputRecord()` both pass an explicit
+   `select` that leaves `unitPrice` / `cost` out. Two reasons, and
+   either is sufficient: a `Prisma.Decimal` cannot be serialised into a
+   client component at all, and an action that echoes a cost back has
+   put one into a response for no reason. The caller already holds the
+   amount it sent, in cents.
 3. The Shop module has no automatic data dependency on Cows & Milk or
    Land & Produce — no code path may read milk or harvest records to
    affect shop stock. Restocking the shop is always a manual, explicit

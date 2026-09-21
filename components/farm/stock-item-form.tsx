@@ -6,6 +6,7 @@ import { SubmitButton } from "@/components/farm/submit-button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createStockItemAction } from "@/app/(app)/shop/actions"
+import { parseAmountToCents } from "@/lib/money"
 import { MAX_STOCK_NAME_LENGTH } from "@/lib/shop-config"
 import { useSingleFlight } from "@/lib/use-single-flight"
 
@@ -17,22 +18,10 @@ import { useSingleFlight } from "@/lib/use-single-flight"
 // explicit restock, which is invariant 3 — the shop's stock is never inferred
 // from anything.
 
-/**
- * Reads a typed amount ("12.50", "12,50", "12") as whole cents.
- *
- * This is the one place a float touches money, and it is immediately rounded
- * to an integer: `12.10 * 100` is 1209.9999999999998 in binary floating point,
- * which is exactly why nothing downstream is allowed to work in units.
- * Returns null for anything that is not an amount, so the caller can say so
- * rather than sending NaN to the server.
- */
-function parsePriceToCents(input: string): number | null {
-  const trimmed = input.trim().replace(",", ".")
-
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null
-
-  return Math.round(Number(trimmed) * 100)
-}
+// The typed-amount reader this form used to own now lives in `lib/money.ts` as
+// `parseAmountToCents`, beside `formatCents`. Land's input-cost form needs the
+// same conversion, and two copies of the code that turns a typed price into
+// cents is two places for money parsing to drift.
 
 /**
  * Owner-only form for adding something to the shop's catalogue. The price is
@@ -56,7 +45,7 @@ export function StockItemForm() {
 
     setFeedback(null)
 
-    const priceCents = parsePriceToCents(price)
+    const priceCents = parseAmountToCents(price)
 
     if (priceCents === null) {
       setFailed(true)

@@ -26,3 +26,25 @@ export function formatCents(cents: number): string {
     maximumFractionDigits: 2,
   })
 }
+
+/**
+ * A typed amount ("12.50", "12,50", "12") as whole cents, or null if it is not
+ * an amount at all.
+ *
+ * The inverse of `formatCents`, and the one place a float touches money on the
+ * way in — the result is immediately an integer, because `12.10 * 100` is
+ * 1209.9999999999998 in binary floating point. That is exactly why nothing
+ * downstream is allowed to work in whole units.
+ *
+ * Null rather than NaN so the caller can say "that isn't an amount" instead of
+ * sending a number the server has to reject. Comma as well as point, because a
+ * numeric phone keypad offers a comma in a lot of locales — the same reason
+ * `quantity-stepper.tsx` accepts one.
+ */
+export function parseAmountToCents(input: string): number | null {
+  const trimmed = input.trim().replace(",", ".")
+
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null
+
+  return Math.round(Number(trimmed) * CENTS_PER_UNIT)
+}

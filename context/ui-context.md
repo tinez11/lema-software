@@ -99,6 +99,16 @@ defaults to next-themes' `system`.
   set for sub-areas (e.g. Milk / Animals / Health), one dominant
   primary-action button (e.g. "Log milk"), and a browsable history
   list beneath it.
+
+  `/land` adds an owner-only **Cost vs. yield** section between the
+  harvest history and the module nav — one panel per crop cycle, in the
+  owner treatment, showing input cost against the quantities harvested.
+  The quantities stay one row per unit and are **never divided into the
+  cost**: kg and crates do not add up, so there is no cost-per-unit
+  figure on that panel at all. Its section sits above the nav because it
+  is data about the module, not a way out of it. A worker's render never
+  runs the query, so the figure is absent from the payload rather than
+  hidden in it.
 - **Shop / POS screen**: a tappable item grid for quick-add, a running
   "current sale" summary panel with per-line quantity steppers, and a
   sticky, high-contrast checkout button at the bottom.

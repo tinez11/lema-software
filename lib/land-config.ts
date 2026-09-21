@@ -35,6 +35,30 @@ export const DEFAULT_HARVEST_UNIT: HarvestUnit = "kg"
 /** A field bigger than this is a mistyped entry, not a smallholding. */
 export const MAX_FIELD_ACRES = 10_000
 
+/**
+ * A cost ceiling in cents for one input entry, to catch a misplaced decimal —
+ * the same guard, and the same figure, as `MAX_STOCK_PRICE_CENTS`. The column
+ * is `Decimal(10, 2)`, so the hard limit is far higher; this is the sane one.
+ */
+export const MAX_INPUT_COST_CENTS = 100_000_00
+
+/**
+ * A fat-finger guard on an input quantity. Deliberately looser than
+ * `MAX_HARVEST_QUANTITY`, because `InputRecord` records no unit for its
+ * quantity — see open question 25 — so the same number could be kilos of seed
+ * or hours of labour and this cannot be a meaningful limit on either.
+ */
+export const MAX_INPUT_QUANTITY = 1_000_000
+
+export const INPUT_QUANTITY_DECIMALS = 2
+
+/** Matches `roundQuantity`, at the finer precision an input may be bought in. */
+export function roundInputQuantity(quantity: number): number {
+  const factor = 10 ** INPUT_QUANTITY_DECIMALS
+
+  return Math.round(quantity * factor) / factor
+}
+
 /** Free text, so the cap is about storage sanity rather than meaning. */
 export const MAX_NAME_LENGTH = 120
 export const MAX_NOTE_LENGTH = 500

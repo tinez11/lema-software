@@ -1,18 +1,22 @@
 import { UserButton } from "@clerk/nextjs"
 import { SproutIcon } from "lucide-react"
 
+import { CostVsYieldSummary } from "@/components/farm/cost-vs-yield-summary"
+import type { CostVsYieldEntry } from "@/components/farm/cost-vs-yield-summary"
 import { CropCycleForm } from "@/components/farm/crop-cycle-form"
 import { FieldForm } from "@/components/farm/field-form"
 import { HarvestEntryForm } from "@/components/farm/harvest-entry-form"
 import type { CropCycleOption } from "@/components/farm/harvest-entry-form"
 import { HarvestHistoryList } from "@/components/farm/harvest-history-list"
+import { InputCostForm } from "@/components/farm/input-cost-form"
 import { ModuleNav } from "@/components/farm/module-nav"
 import type { HarvestHistoryEntry } from "@/components/farm/harvest-history-list"
 import { AuthNotice } from "@/components/farm/auth-notice"
-import { requireModule } from "@/lib/auth/roles"
+import { requireModule, requireOwner } from "@/lib/auth/roles"
 import { resolveAuthGate } from "@/lib/auth/session"
 import { farmDate, toDateInputValue } from "@/lib/db/dates"
 import {
+  getCostVsYieldWithFinancials,
   getCropCyclesForSelection,
   getFields,
   getHarvestHistory,
@@ -20,13 +24,13 @@ import {
 import type { CropCycleForSelection } from "@/lib/db/land"
 
 // Land & Produce. Both roles log a harvest; only the owner sets up the fields
-// and crop cycles those harvests are logged against.
+// and crop cycles those harvests are logged against, logs what the inputs cost,
+// and sees the cost-vs-yield summaries.
 //
-// `InputRecord` — cost entry and the cost-vs-yield reporting it feeds — is
-// deliberately absent: it is the module's only money-bearing model and was out
-// of this unit's scope. The question that held it up (how money crosses the
-// server/client boundary) is now answered — integer cents, `lib/db/money.ts` —
-// so it is unblocked whenever it is wanted.
+// Cost is invariant 2 at the read end. `getCostVsYieldWithFinancials()` is only
+// reached through the `requireOwner()` branch below, so a worker's render never
+// runs the query — the figure is absent from the payload, not hidden in it with
+// CSS. That is the same reason the shop screen splits its history reads.
 
 const dayFormat = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
@@ -72,7 +76,11 @@ export default async function LandPage() {
     )
   }
 
-  const owner = gate.user.role === "OWNER"
+  // Narrowed rather than read off the role directly, so the owner-only reads
+  // below are gated by the same check the actions use. `owner` stays for the
+  // density switches, which are presentation and not permission.
+  const ownerCheck = requireOwner(gate)
+  const owner = ownerCheck.ok
   const today = farmDate()
 
   const [cycles, harvests, fields] = await Promise.all([
@@ -87,6 +95,25 @@ export default async function LandPage() {
     id: cycle.id,
     label: cycleLabel(cycle),
   }))
+
+  // One privileged read per cycle, and only inside the owner branch. A worker
+  // reaching this line is impossible: `ownerCheck.ok` is false and the array
+  // stays empty, so no cost is fetched, let alone serialised.
+  //
+  // Keyed by cycle id rather than by the label, because the label is not
+  // unique — two cycles of the same crop in the same field read identically,
+  // which is open question 17.
+  const costVsYield = ownerCheck.ok
+    ? await Promise.all(
+        cycles.map(async (cycle) => ({
+          id: cycle.id,
+          summary: {
+            cropLabel: cycleLabel(cycle),
+            ...(await getCostVsYieldWithFinancials(cycle.id)),
+          } satisfies CostVsYieldEntry,
+        }))
+      )
+    : []
 
   const historyEntries: HarvestHistoryEntry[] = harvests.map((harvest) => ({
     id: harvest.id,
@@ -142,6 +169,22 @@ export default async function LandPage() {
           />
         </section>
 
+        {/* Owner-only, and above the nav because it is data about this module
+            rather than a way out of it. */}
+        {owner && costVsYield.length > 0 && (
+          <section className="flex flex-col gap-3">
+            <h2 className="text-lg font-semibold">Cost vs. yield</h2>
+            <p className="text-sm text-muted-foreground">
+              What each cycle has cost in inputs, against what it has produced.
+              Quantities are listed in the units they were logged in — kg and
+              crates do not add up, so there is no single figure for both.
+            </p>
+            {costVsYield.map(({ id, summary }) => (
+              <CostVsYieldSummary key={id} {...summary} />
+            ))}
+          </section>
+        )}
+
         <ModuleNav
           assignedModules={gate.user.assignedModules}
           current="LAND"
@@ -152,8 +195,9 @@ export default async function LandPage() {
           <section className="flex flex-col gap-3">
             <h2 className="text-lg font-semibold">Setup</h2>
             <p className="text-sm text-muted-foreground">
-              Fields and crop cycles are yours to create. Workers log harvests
-              against them but cannot add either.
+              Fields, crop cycles and input costs are yours. Workers log
+              harvests against them but cannot add any of the three, and never
+              see a cost.
             </p>
             <FieldForm />
             <CropCycleForm
@@ -163,6 +207,7 @@ export default async function LandPage() {
               }))}
               todayValue={toDateInputValue(today)}
             />
+            <InputCostForm cycles={cycleOptions} />
           </section>
         )}
       </main>

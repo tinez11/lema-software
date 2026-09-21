@@ -1,5 +1,6 @@
 "use server"
 
+import { InputType } from "@prisma/client"
 import { refresh } from "next/cache"
 import { z } from "zod"
 
@@ -10,14 +11,18 @@ import {
   createCropCycle,
   createField,
   createHarvestRecord,
+  createInputRecord,
 } from "@/lib/db/land"
 import {
   HARVEST_UNITS,
   MAX_FIELD_ACRES,
   MAX_HARVEST_QUANTITY,
+  MAX_INPUT_COST_CENTS,
+  MAX_INPUT_QUANTITY,
   MAX_NAME_LENGTH,
   MAX_NOTE_LENGTH,
   MIN_HARVEST_QUANTITY,
+  roundInputQuantity,
   roundQuantity,
 } from "@/lib/land-config"
 
@@ -29,10 +34,11 @@ import {
 // Setting up fields and crop cycles is registry work; logging a harvest
 // against one is the daily job, and either role does that.
 //
-// Nothing in this file touches money. `InputRecord` — the module's only
-// money-bearing model — is deliberately out of this unit. When its cost entry
-// lands, the amount arrives from the client as integer cents and
-// `fromCents()` converts it before the query: see `lib/db/money.ts`.
+// `createInputRecordAction` is the one write here that touches money, and it is
+// owner-only for that reason (invariant 2). The amount arrives from the client
+// as integer cents — never a float of whole units, never a string — and
+// `createInputRecord` converts it with `fromCents()` on the way into the
+// column: see `lib/db/money.ts`. No cost is ever returned by this file.
 
 const nameSchema = z
   .string()
@@ -89,6 +95,31 @@ const createCropCycleSchema = z
     }
   )
 
+const createInputRecordSchema = z.object({
+  cropCycleId: z.string().min(1, "Pick a crop cycle."),
+  type: z.enum(InputType),
+  // Nullable because the column is: a lump purchase or an hour of labour can
+  // carry a cost and no meaningful count. An empty box is "not given", not
+  // zero, the same way a field's acreage is.
+  quantity: z
+    .number({ error: "Quantity has to be a number." })
+    .positive("Quantity has to be more than zero.")
+    .max(MAX_INPUT_QUANTITY, "That quantity is too large — check it.")
+    .nullish()
+    .transform((value) => value ?? null),
+  // Whole cents, and checked to be whole here rather than left to throw inside
+  // `fromCents()`: a forged POST carrying 12.5 cents should come back as a
+  // typed `invalid`, not as a 500.
+  costCents: z
+    .number({ error: "Enter what it cost." })
+    .int("Cost has to be a whole number of cents.")
+    // Zero is allowed. `InputRecord.cost` is not nullable, so zero is the only
+    // way to record an input that cost no cash — own-saved seed, or family
+    // labour — and refusing it would mean the entry could not be made at all.
+    .min(0, "Cost can't be negative.")
+    .max(MAX_INPUT_COST_CENTS, "That cost is too large — check the decimal."),
+})
+
 const logHarvestSchema = z.object({
   cropCycleId: z.string().min(1, "Pick a crop cycle."),
   quantity: z
@@ -103,6 +134,7 @@ const logHarvestSchema = z.object({
 
 export type CreateFieldInput = z.input<typeof createFieldSchema>
 export type CreateCropCycleInput = z.input<typeof createCropCycleSchema>
+export type CreateInputRecordInput = z.input<typeof createInputRecordSchema>
 export type LogHarvestInput = z.input<typeof logHarvestSchema>
 
 /**
@@ -120,6 +152,18 @@ export type CreateCropCycleResult =
   | { status: "ok"; cropType: string }
   | { status: "not-owner" }
   | { status: "unknown-field" }
+  | { status: "invalid"; message: string }
+  | { status: "not-allowed" }
+
+/**
+ * `ok` carries the type back and nothing about the cost. The form already
+ * holds the amount it sent, so echoing it would be a second copy of a money
+ * value crossing the boundary for no reason.
+ */
+export type CreateInputRecordResult =
+  | { status: "ok"; type: InputType }
+  | { status: "not-owner" }
+  | { status: "unknown-cycle" }
   | { status: "invalid"; message: string }
   | { status: "not-allowed" }
 
@@ -192,6 +236,50 @@ export async function createCropCycleAction(
   refresh()
 
   return { status: "ok", cropType: result.cycle.cropType }
+}
+
+/**
+ * Owner-only: logs what went into a cycle and what it cost.
+ *
+ * The owner check is the first statement, before the input is parsed — so a
+ * worker's forged POST is refused without a cost ever being read, validated or
+ * written, and `not-owner` comes back distinct from `invalid`. This is the
+ * money-bearing write in the module, so that ordering is invariant 2 at the
+ * write end rather than a courtesy.
+ *
+ * Like the harvest action, the date is derived on the server: every screen here
+ * logs today, and `createInputRecord` still takes one for the backdating and
+ * sync paths that come later.
+ */
+export async function createInputRecordAction(
+  input: CreateInputRecordInput
+): Promise<CreateInputRecordResult> {
+  const caller = requireOwner(await resolveAuthGate())
+
+  if (!caller.ok) return { status: caller.status }
+
+  const parsed = createInputRecordSchema.safeParse(input)
+
+  if (!parsed.success) {
+    return { status: "invalid", message: firstIssue(parsed.error) }
+  }
+
+  const result = await createInputRecord(
+    parsed.data.cropCycleId,
+    farmDate(),
+    parsed.data.type,
+    parsed.data.quantity === null
+      ? null
+      : roundInputQuantity(parsed.data.quantity),
+    parsed.data.costCents,
+    caller.user.id
+  )
+
+  if (!result.ok) return { status: "unknown-cycle" }
+
+  refresh()
+
+  return { status: "ok", type: result.record.type }
 }
 
 /**

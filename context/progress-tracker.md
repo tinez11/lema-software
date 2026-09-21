@@ -28,6 +28,13 @@ but it adds three more walkthroughs rather than removing any: a double
 tap on checkout is the one check on that list a browser is the only
 place to settle.
 
+`10-land-costs.md` then landed `InputRecord` and the cost-vs-yield
+summary, which is the last write path Phase 1 was missing and the first
+money-bearing one in Land. Its data-layer checks — including invariant 2
+at runtime — were settled against the live database rather than deferred,
+so what it adds to the walkthrough list is one item: the owner-only
+gating seen with a real worker session.
+
 Cows & Milk went first because `MilkRecord` is the simplest shape and
 its `@@unique([date, session])` constraint is the invariant most worth
 exercising early. Land & Produce followed, deliberately without its
@@ -491,6 +498,88 @@ back to 0.
 | The PIN pad's checking state is distinct from offline and lockout | ◐ distinct in the source by colour (muted vs. `--destructive`), by icon (turning loader vs. static `WifiOff`), and by the message itself; the slots are also disabled, which offline does not do. **Not yet seen on screen** |
 | The post-sign-in gap no longer flashes blank | ◐ the mechanism is confirmed from the SDK rather than guessed: `@clerk/nextjs` 7.9.2 wires `routerPush`/`routerReplace` to Next's router, so the hop to `/` is a soft navigation and this page stays mounted through it — which is what makes an overlay here able to cover the gap at all. **Not yet seen signed in**, and it is the one check of the three that cannot be inferred any further without a session |
 
+- **`10-land-costs.md` — `InputRecord` and cost vs. yield** ✅ (verified
+  against the live database, including invariant 2 at runtime)
+  - Three of the helpers the spec named — `getInputRecords`,
+    `getInputRecordsWithFinancials` and `sumInputCostWithFinancials` —
+    already existed from the open-question-6 work, so they were built on
+    rather than rewritten. The empty-cycle check was re-run anyway, as
+    the spec asked.
+  - `lib/db/land.ts` gained `createInputRecord()` and
+    `getCostVsYieldWithFinancials()`. The write takes `costCents` and
+    converts with `fromCents()`; it catches the same missing-reference
+    codes as `createHarvestRecord` and returns a typed `unknown-cycle`.
+  - **The write selects around `cost`.** Unlike `createHarvestRecord`
+    beside it, the full `InputRecord` row carries a `Prisma.Decimal`,
+    which cannot be serialised into a client component — so the insert
+    passes `select: { id, type, quantity }`, exactly as
+    `createStockItem` does. Invariant 2 in `architecture.md` now says
+    this about write helpers and not only about reads.
+  - **No cost-per-unit figure anywhere.** `getCostVsYieldWithFinancials`
+    returns `{ totalCostCents, harvestByUnit }` and the summary panel
+    shows the money beside the list of quantities. A ratio was not
+    computed even for the single-unit case: it would be a number that
+    silently disappears the first time a second unit is logged, which is
+    worse than never offering one. `code-standards.md` carries the rule.
+  - `lib/land-config.ts` gained `MAX_INPUT_COST_CENTS` (the same figure
+    as `MAX_STOCK_PRICE_CENTS`), `MAX_INPUT_QUANTITY` and
+    `roundInputQuantity()`.
+  - `createInputRecordAction` — `requireOwner()` as the first statement,
+    then `zod`, then the helper, then `refresh()`. `costCents` is
+    validated as an **integer** there rather than left to throw inside
+    `fromCents()`, so a forged POST carrying half a cent comes back as a
+    typed `invalid` and not a 500. Zero is accepted: `cost` is not
+    nullable, so zero is the only way to record own-saved seed or family
+    labour.
+  - `components/farm/input-cost-form.tsx` — `ChoiceGrid` over
+    `InputType` (four schema-fixed values), a cost box read as whole
+    currency, and an optional quantity. `InputType` is imported as a
+    **type** only, per the `session-toggle.tsx` rule, and the on-screen
+    labels are a complete `Record<InputType, string>` so a new enum
+    member becomes a compile error rather than a missing cell.
+  - `parsePriceToCents` moved out of `stock-item-form.tsx` into
+    `lib/money.ts` as `parseAmountToCents`, beside `formatCents`. Land
+    needs the same conversion, and two copies of the code that turns a
+    typed price into cents is two places for money parsing to drift.
+  - `components/farm/cost-vs-yield-summary.tsx` — a server component
+    with no `"use client"`, so a cost figure is never shipped to a
+    worker's bundle even unrendered.
+  - `/land` gates both by `requireOwner(gate)` rather than by
+    `role === "OWNER"` directly, and the per-cycle reads happen **inside**
+    that branch: a worker's render never runs the query, so the cost is
+    absent from the payload rather than hidden in it.
+  - **The optional dashboard card swap was not done**, and not for lack
+    of effort: the helper the spec named to read from,
+    `getCostVsYieldWithFinancials`, is **per cycle**, while the Land card
+    is farm-wide. It would need a new farm-wide cost helper — a second
+    privileged export to gate — which is not the one-card change the
+    spec assumed. Left as its own pass; see "Next Up".
+  - `CropCycle` status transitions untouched, as instructed.
+
+### Verification of `10-land-costs.md`
+
+Run as a temporary root-level probe against the live Postgres
+(`npx tsx --conditions=react-server land-cost-probe.ts`), which created
+its own field, cycle, inputs and harvests and deleted all of them
+afterwards — confirmed by a follow-up count of 0 leftover rows. The
+probe file was removed.
+
+| Check from the spec | Result |
+| --- | --- |
+| A worker cannot create an `InputRecord`, rejected before validation | ✅ two halves, both checked. `requireOwner()` on a constructed `WORKER` gate returns `{ ok: false, status: "not-owner" }` and on an `OWNER` gate returns `ok: true`; and in `createInputRecordAction` the `requireOwner` line is statement 1 while `safeParse` is statement 2, so nothing is parsed or read first |
+| An unknown crop cycle returns `unknown-cycle`, not a crash | ✅ `createInputRecord("cycle-that-does-not-exist", …)` returned `{ ok: false, reason: "unknown-cycle" }` against the real database |
+| `sumInputCostWithFinancials` on an empty cycle is `{ totalCents: 0 }` | ✅ returned exactly that on a freshly opened cycle, and `getCostVsYieldWithFinancials` on the same cycle returned `{ totalCostCents: 0, harvestByUnit: [] }` |
+| `getInputRecords` never carries `cost` or `costCents` | ✅ at runtime, not only at compile time. Its keys came back as `id, clientId, cropCycleId, date, type, quantity, deviceId, createdAt, updatedAt, recordedById` — neither `cost` nor `costCents` present. The privileged twin's keys are the same list plus `costCents`, and still no `cost` |
+| The insert itself returns no cost | ✅ `createInputRecord`'s returned record has keys `id, type, quantity` |
+| Two units show separately, never a blended figure | ✅ a cycle harvested at 40 kg and 12 crates returned `[{kg, 40}, {crates, 12}]`, largest first, and the summary object has exactly two keys — `totalCostCents` and `harvestByUnit` — so there is no ratio field to render |
+| The sum is a real sum | ✅ 12.50 + 30.75 came back as `4325` cents, so `fromCents`/`toCents` round-trip through `Decimal(10, 2)` without drift |
+| A null quantity is accepted | ✅ a `LABOR` entry with `quantity: null` inserted and read back as null — the column is nullable and a cost with no count is a complete entry |
+| No `Decimal` reaches a rendered payload | ✅ every payload — both reads, the summary and the empty sum — `JSON.stringify`d without throwing, and the output contains no `Decimal` internals (`"s":`/`"e":`/`"d":[`) and no `"cost"` key |
+| `npm run build` passes | ✅ 11 routes, unchanged set |
+| `npm run lint` passes | ✅ exit 0 |
+| `npx tsc --noEmit` passes | ✅ exit 0 |
+| The owner-only gate on the new reads | ◐ proven in the source: `getCostVsYieldWithFinancials` is called only inside the `ownerCheck.ok` branch of `/land`, and `requireOwner` is what produces that boolean. **Not yet seen** with a worker's Clerk session, which is the same gap every other screen's walkthrough has |
+
 ## In Progress
 
 Both `04-milk-entry.md` and `05-land-produce.md` are built and verified
@@ -560,6 +649,17 @@ browser work, and it is **not yet done**:
     (who lands on `/`) and a worker (who is sent on to `/lock` or
     `/set-pin`, so the wait covers two hops rather than one).
 
+**Land costs**
+
+13. `/land` opened as a **worker**, confirming the Cost vs. yield
+    section and the "Log input cost" form are both absent — and, in the
+    page source rather than only on screen, that no cost figure is in
+    the payload at all. That last part is invariant 2 at the last mile,
+    the same check `06-shop.md` left outstanding for its history rows.
+14. An input cost logged through the real form, then the cycle's summary
+    confirmed to move. The data layer is proven; what a browser adds is
+    that `refresh()` puts the new total on screen without a reload.
+
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
 re-render them in the action's own response. If a saved entry does not
@@ -570,11 +670,16 @@ test can reach.
 ## Next Up
 
 1. Finish the walkthroughs above.
-2. Land's own `InputRecord` — cost entry and the cost-vs-yield
-   reporting it feeds. Left out of `05-land-produce.md` because it
-   forced open question 6; that is now answered, so it is unblocked
-   whenever it is wanted. It is also what turns the dashboard's Land
-   card from an activity figure into a yield-against-cost one.
+2. **The dashboard's Land card, as a cost figure.** Deferred out of
+   `10-land-costs.md` on purpose. The spec offered it as a one-card
+   change reading `getCostVsYieldWithFinancials`, but that helper is
+   per cycle and the card is farm-wide, so it needs a new farm-wide
+   cost helper — which means a second privileged export to gate, and a
+   decision about what the card should say when cycles were harvested
+   in different units. Worth doing, but it is its own unit, not a line
+   change. Whoever picks it up should decide first whether the card
+   shows spend, or spend against the headline unit, and record that in
+   `ui-context.md` before writing it.
 3. The animal registry, health records and breeding records; the
    `CropCycle` status transition (`PLANNED` → `GROWING` → `HARVESTED`).
    All deliberately left out of the write paths because they neither
@@ -782,6 +887,26 @@ test can reach.
    it to reconcile offline writes. Building a competing mechanism now
    would mean two ideas about what `clientId` means. Do it **with**
    Phase 3, where the same key serves both.
+25. **An input quantity has no unit.** `InputRecord.quantity` is a
+   `Float?` and the model has no unit column, unlike `HarvestRecord`
+   which carries one. So "20" against a `FERTILIZER` entry could be
+   kilos, bags or litres, and nothing in the schema or the context files
+   says which. The consequences today: `MAX_INPUT_QUANTITY` cannot be a
+   meaningful limit, nothing can aggregate the column across records,
+   and the input-cost form says so on screen rather than implying a
+   unit it does not store — "no unit is stored with this number, it is a
+   count for your own reference". The cost is what the cost-vs-yield
+   summary reports, and the cost has no such ambiguity.
+
+   Three ways out, in increasing cost: leave it as a per-owner memo and
+   say so (what it does now); add a `unit` column mirroring
+   `HarvestRecord` and a fixed set beside `HARVEST_UNITS`; or make the
+   unit a property of `InputType` (seed in kg, labour in hours), which
+   reads best but bakes a rule into the enum. This is the same shape of
+   question as 16 — the harvest unit set being a guess — and probably
+   wants the same answer at the same time. A schema change, so per
+   `ai-workflow-rules.md` it is a deliberate reviewed decision, not
+   something to fold into a feature unit.
 
 ## Architecture Decisions
 
