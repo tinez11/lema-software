@@ -418,9 +418,11 @@ back to 0.
 | The Land card shows a quantity, never a cost | ✅ `getRecentHarvestSummary` selects quantity and unit only, and has no `...WithFinancials` twin to reach for |
 | Shop revenue comes from the privileged helper | ✅ and the safe count-only twin exists unused, as the spec asked |
 | The needs-attention list shows real low-stock items and nothing fabricated | ✅ its only source is `getLowStockItems()`. No milk or land alert was invented; `needs-attention-list.tsx` records why in a comment, so the next person to add one does it with a real source |
-| The owner reaches milk at `/milk`, unchanged in substance | ⏳ builds and type-checks; **not yet seen in a browser** |
-| The grid is multi-column on desktop and single on phone | ⏳ **not yet seen at either width** |
-| A worker assigned only `LAND` or `SHOP` lands there | ⏳ **not yet walked** — needs two Clerk sessions and a direct `assignedModules` edit |
+| The owner reaches milk at `/milk`, unchanged in substance | ◐ the route is live on a running dev server — `/milk` is served and the auth middleware redirects it to `/sign-in?redirect_url=…%2Fmilk`, so it resolves rather than 404s. The screen itself is **not yet seen signed in** |
+| The grid is multi-column on desktop and single on phone | ◐ the stylesheet carries `.grid-cols-1` and `.md\:grid-cols-3` inside `@media (min-width:48rem)`, so the classes exist at the intended breakpoint. **Not yet seen rendered at either width** |
+| The needs-attention accent edge renders | ✅ resolved without a session. `.border-l-moss` (byte 18729), `.border-l-gold` (18677) and `.border-l-ochre` (18781) all fall **after** `.border-border` (17537) in the emitted stylesheet, so at equal specificity the accent wins `border-left-color`. The `border-l-[var(--accent-*)]` fallback is not needed |
+| The `--sidebar-*` tokens are gone from the shipped CSS | ✅ zero occurrences of "sidebar" in the built stylesheet, not just in the source |
+| A worker assigned only `LAND` or `SHOP` lands there | ⏳ **not yet walked** — needs two Clerk sessions and a direct `assignedModules` edit. The one check with no offline substitute |
 
 ## In Progress
 
@@ -461,19 +463,18 @@ browser work, and it is **not yet done**:
 **Owner dashboard**
 
 8. The metric grid seen at **both** widths: one column on a phone,
-   three across on a computer. A build cannot catch a broken
-   breakpoint.
+   three across on a computer. Half-checked without a session — the
+   emitted stylesheet does carry `.grid-cols-1` and, inside
+   `@media (min-width:48rem)`, `.md\:grid-cols-3`, so the classes are
+   generated and the breakpoint is the intended 768px. What is still
+   unseen is the rendered page: that the grid is the element those
+   classes land on and nothing above it constrains the width.
 9. A worker assigned only `LAND`, then only `SHOP`, confirmed to land on
    that module from `/` rather than on milk. This is the routing gap the
    dashboard unit was written to close, and it is the one claim in it
    that nothing offline can prove — `assignedModules` has to be edited
-   directly in the database for now (open question 19).
-10. The needs-attention list's left accent edge confirmed to render. It
-    sets `border-border` on all four sides and then a per-module
-    `border-l-*`, which have equal CSS specificity, so which wins
-    depends on the order Tailwind emits them. If the edge comes out the
-    default border colour, use `border-l-[var(--accent-moss)]` and its
-    two siblings instead.
+   directly in the database for now (open question 19), and it needs two
+   Clerk sessions.
 
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
