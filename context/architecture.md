@@ -95,17 +95,19 @@
   back in on their next sign-in without a PIN
 - `app/(app)/` — the route group holding every real app screen. Its
   layout applies the auth gate once, so no page underneath it has to
-  apply the gate again. `app/(app)/page.tsx` routes on role: a worker
-  lands on the milk entry screen itself, an owner on the Cows & Milk
-  module home
-- `app/(app)/milk/actions.ts`, `app/(app)/land/`, `app/(app)/shop/` — each module's server
-  actions. A module's writes live in an `actions.ts` beside its route
-  rather than in `lib/db/`, because this is where the caller's identity
-  is resolved (from Clerk, never from a prop) and its input validated
-  with `zod` before a query helper is reached. `milk/` holds no
-  `page.tsx` — its screens are reached through `/`, which is still where
-  both roles land; `land/` and `shop/` have one each, at `/land` and
-  `/shop`
+  apply the gate again. `app/(app)/page.tsx` is a role branch and nothing
+  else: an owner gets the three-module dashboard, a worker is redirected
+  to the first module they are assigned (`landingHrefFor()` in
+  `lib/modules.ts`, registry order). It used to *be* the milk screen,
+  which meant a worker assigned only LAND or only SHOP still landed on
+  milk — the assignment existed in the schema and the landing ignored it
+- `app/(app)/milk/`, `app/(app)/land/`, `app/(app)/shop/` — each module's
+  screen and server actions. A module's writes live in an `actions.ts`
+  beside its route rather than in `lib/db/`, because this is where the
+  caller's identity is resolved (from Clerk, never from a prop) and its
+  input validated with `zod` before a query helper is reached. All three
+  now hold a `page.tsx`, at `/milk`, `/land` and `/shop`; milk's arrived
+  when the dashboard took over `/`
 - `app/lock/`, `app/set-pin/` — outside that group on purpose: a locked
   worker has to be able to reach the screen the group redirected them to
 - `app/api/webhooks/clerk/` — creates the Prisma `User` row on

@@ -16,9 +16,11 @@ walkthrough of each screen; see "In Progress".
 
 ## Current Goal
 
-Close out Phase 1 by walking all three screens in a browser, then build
-the three-module owner dashboard — which is now unblocked for the first
-time, since every module has something real to show.
+Close out Phase 1 by walking every screen in a browser. The three-module
+owner dashboard is now built — `/` is the owner's dashboard and a
+worker's router, and Cows & Milk moved to `/milk` — so the walkthroughs
+are the only thing left, and the dashboard has added three of its own to
+the list.
 
 Cows & Milk went first because `MilkRecord` is the simplest shape and
 its `@@unique([date, session])` constraint is the invariant most worth
@@ -340,6 +342,51 @@ back to 0.
 | Extra — a new item starts at zero stock | ✅ stocking the shelf stays a separate explicit act (invariant 3) |
 | Extra — `formatCents` | ✅ 3750 → "37.50", 5 → "0.05" |
 
+- **`08-owner-dashboard.md` — the three-module dashboard** ✅ (browser
+  walkthrough outstanding — see "In Progress")
+  - `app/(app)/page.tsx` is now a role branch and nothing else: the
+    owner's dashboard, or `redirect(landingHrefFor(assignedModules))`
+    for a worker. Cows & Milk moved out to `app/(app)/milk/page.tsx`,
+    so all three modules are routed alike and `lib/modules.ts` no
+    longer special-cases `MILK` at `/`.
+  - That redirect is the unit's real fix. Because `/` *was* the milk
+    screen, a worker assigned only `LAND` or only `SHOP` still landed on
+    milk; the assignment was in the schema and the landing ignored it.
+  - Reads: `getTodayMilkTotal` (milk), `getRecentHarvestSummary` (land,
+    grouped by unit — kg and crates do not add up), and
+    `getTodaySalesSummary` / `...WithFinancials` (shop). Low-stock rows
+    reuse the existing `getLowStockItems()` rather than the
+    `getLowStockAlerts()` the spec named, which would have duplicated it
+    exactly.
+  - `lib/db/dates.ts` gained `civilDayRange()`. `Sale.date` is a
+    timestamp, not a `@db.Date` column, so today's sales need a
+    half-open instant range — comparing against `farmDate()`'s
+    midnight-UTC value would have selected the wrong day on any server
+    west of Greenwich.
+  - `components/farm/metric-card.tsx` and `needs-attention-list.tsx`,
+    both presentational: the page owns every query, so the owner-only
+    call sites are all visible in one place.
+  - The needs-attention list has one source, low stock, because it is
+    the only alert with real data behind it. No milk or land alert was
+    invented.
+  - `--sidebar-*` tokens deleted from `app/globals.css` (open question
+    4), and open question 18 settled per screen rather than app-wide
+    (`ui-context.md`, "Viewport").
+
+### Verification of `08-owner-dashboard.md`
+
+| Check | Result |
+| --- | --- |
+| `npm run build` passes | ✅ 11 routes, `/milk` compiled alongside `/` |
+| `npm run lint` passes | ✅ exit 0 |
+| `npx tsc --noEmit` passes | ✅ exit 0 |
+| No `Decimal` in the dashboard's payload | ✅ `getTodaySalesSummaryWithFinancials` returns `revenueCents: number`; `totalAmount` never leaves the helper. Milk liters and harvest quantities are `Float` in the schema, so neither was ever a `Decimal` |
+| The Land card shows a quantity, never a cost | ✅ `getRecentHarvestSummary` selects quantity and unit only, and has no `...WithFinancials` twin to reach for |
+| Shop revenue comes from the privileged helper | ✅ and the safe count-only twin exists unused, as the spec asked |
+| The owner reaches milk at `/milk`, unchanged in substance | ⏳ builds and type-checks; **not yet seen in a browser** |
+| The grid is multi-column on desktop and single on phone | ⏳ **not yet seen at either width** |
+| A worker assigned only `LAND` or `SHOP` lands there | ⏳ **not yet walked** — needs two Clerk sessions and a direct `assignedModules` edit |
+
 ## In Progress
 
 Both `04-milk-entry.md` and `05-land-produce.md` are built and verified
@@ -376,6 +423,23 @@ browser work, and it is **not yet done**:
    refusal is confirmed to reach the screen as a message rather than a
    crash.
 
+**Owner dashboard**
+
+8. The metric grid seen at **both** widths: one column on a phone,
+   three across on a computer. A build cannot catch a broken
+   breakpoint.
+9. A worker assigned only `LAND`, then only `SHOP`, confirmed to land on
+   that module from `/` rather than on milk. This is the routing gap the
+   dashboard unit was written to close, and it is the one claim in it
+   that nothing offline can prove — `assignedModules` has to be edited
+   directly in the database for now (open question 19).
+10. The needs-attention list's left accent edge confirmed to render. It
+    sets `border-border` on all four sides and then a per-module
+    `border-l-*`, which have equal CSS specificity, so which wins
+    depends on the order Tailwind emits them. If the edge comes out the
+    default border colour, use `border-l-[var(--accent-moss)]` and its
+    two siblings instead.
+
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
 re-render them in the action's own response. If a saved entry does not
@@ -386,16 +450,12 @@ test can reach.
 ## Next Up
 
 1. Finish the walkthroughs above.
-2. **The three-module owner dashboard** — the metric card grid and the
-   cross-module "needs attention" list. Unblocked for the first time:
-   all three modules now have data worth showing. Per
-   `ai-workflow-rules.md`, Phase 3 (PowerSync offline sync) does not
-   start until Phase 1 is complete.
-3. Land's own `InputRecord` — cost entry and the cost-vs-yield
+2. Land's own `InputRecord` — cost entry and the cost-vs-yield
    reporting it feeds. Left out of `05-land-produce.md` because it
    forced open question 6; that is now answered, so it is unblocked
-   whenever it is wanted.
-4. The animal registry, health records and breeding records; the
+   whenever it is wanted. It is also what turns the dashboard's Land
+   card from an activity figure into a yield-against-cost one.
+3. The animal registry, health records and breeding records; the
    `CropCycle` status transition (`PLANNED` → `GROWING` → `HARVESTED`).
    All deliberately left out of the write paths because they neither
    block them nor share them.
@@ -411,9 +471,12 @@ test can reach.
    by className so `components/ui/button.tsx` stays as generated.
 3. ~~**App metadata.**~~ Resolved — `app/layout.tsx` now carries the real
    title and description.
-4. **Sidebar tokens.** `--sidebar-*` variables are mapped to the
-   palette for completeness, but no layout in `ui-context.md` uses a
-   sidebar. Drop them if a sidebar never materialises.
+4. ~~**Sidebar tokens.**~~ Resolved — a sidebar never materialised. The
+   owner dashboard settled that the app gets none (open question 18),
+   because a persistent module rail would duplicate `module-nav.tsx`,
+   so all sixteen `--sidebar-*` definitions and their `--color-sidebar-*`
+   mappings were deleted from `app/globals.css`. Nothing had ever
+   referenced one.
 5. ~~**Where the worker cost/price filter lives.**~~ Resolved — it lives
    inside `lib/db/` as two exports per financial query. See the
    decision below; `architecture.md` invariant 2 and
@@ -520,7 +583,18 @@ test can reach.
    there is only ever one season's worth. The moment the `PLANNED` →
    `GROWING` → `HARVESTED` transition lands, the picker needs either the
    planting year or a filter to open cycles.
-18. **Nothing defines what any screen looks like on a computer.**
+18. ~~**Nothing defines what any screen looks like on a computer.**~~
+   Resolved — settled before the dashboard was built, as the question
+   itself asked for. The answer is **per screen, not app-wide**: worker
+   task screens keep the centred `max-w-xl` phone column, the owner's
+   module screens keep `max-w-2xl`, and only the dashboard widens, to
+   `max-w-5xl`, because it is the one screen with a 3-across grid and
+   three cards in a phone column are just a list. No sidebar — it would
+   duplicate `module-nav.tsx` — which is what closed open question 4.
+   Recorded in `ui-context.md` under "Viewport". The original question
+   follows.
+
+   **Nothing defines what any screen looks like on a computer.**
    `project-overview.md` puts "a PWA usable on both phone and computer"
    in scope, and `architecture.md` lists the platform as phone **and**
    computer. But every screen built so far is phone-shaped: a single
@@ -922,11 +996,24 @@ test can reach.
   every price tag is exactly the sort of invented product fact
   `ai-workflow-rules.md` forbids. `formatCents` groups and fixes to two
   decimals; naming the currency later is a one-line change.
-- **The owner's home is one module, not the dashboard.** The spec was
-  explicit and it is the right call: a three-module dashboard built now
-  would have two cards reading from modules with no write path. The
-  owner's "Worker PINs" section stays on that page, because removing it
-  would take away the only route out of a forgotten PIN.
+- **The owner's home was one module, and is now the dashboard.**
+  Through the milk, land and shop units the owner's home was the Cows &
+  Milk screen, because a three-module dashboard built then would have
+  had two cards reading from modules with no write path. All three have
+  one now, so `/` became the dashboard and Cows & Milk moved to `/milk`
+  beside `/land` and `/shop`.
+
+  That move also closed a routing gap the old arrangement hid: because
+  `/` *was* the milk screen, a worker assigned only `LAND` or only
+  `SHOP` still landed on milk and had to find their way out through the
+  nav. `assignedModules` existed in the schema and the landing ignored
+  it. `/` is now a role branch only — the dashboard, or
+  `landingHrefFor()` sending a worker to the first module they are
+  actually assigned.
+
+  The "Worker access" section moved with the dashboard rather than
+  staying with the module: it was only ever on that screen by virtue of
+  it being home, and it is still the only route out of a forgotten PIN.
 
 ## Session Notes
 

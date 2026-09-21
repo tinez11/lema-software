@@ -90,7 +90,11 @@ defaults to next-themes' `system`.
 - **Owner dashboard**: vertical stack — greeting header, a 3-across
   equal-weight metric card grid (one per module, collapsing to a
   single column on phone widths), and a single "needs attention" list
-  below that cuts across all three modules.
+  below that cuts across all three modules. Built at `/`, in a
+  `max-w-5xl` container — the one screen that is not a phone-width
+  column; see "Viewport" below. The needs-attention list currently has
+  one source, low stock, because that is the only alert with real data
+  behind it.
 - **Module home screens**: header with back navigation, a small tab
   set for sub-areas (e.g. Milk / Animals / Health), one dominant
   primary-action button (e.g. "Log milk"), and a browsable history
@@ -117,6 +121,28 @@ defaults to next-themes' `system`.
 - Owner-facing screens may use a softer, layered visual treatment;
   worker-facing screens stay flat and high-contrast, since speed and
   outdoor legibility matter more than mood there.
+
+## Viewport
+
+The app is a PWA on both phone and computer (`architecture.md`), but the
+two do not get the same layout, and the split is per screen rather than
+app-wide. This answers open question 18, settled before the dashboard was
+built because that is the screen where the difference costs something.
+
+| Screen | Container | Why |
+| --- | --- | --- |
+| Worker task screens | `max-w-xl`, centred | One task at a time, large controls. Width buys nothing. |
+| Owner module screens | `max-w-2xl`, centred | A form and a history list; a second column would be padding. |
+| Owner dashboard | `max-w-5xl`, centred | The only screen with a 3-across grid. Three cards in a phone column are just a list. |
+
+The dashboard grid is `grid-cols-1` below `md` and `grid-cols-3` from `md`
+up. Every other screen keeps the centred phone column it already had.
+
+**No sidebar.** A persistent module rail would duplicate
+`components/farm/module-nav.tsx`, which already has its own deliberate
+treatment. The `--sidebar-*` tokens shadcn generated were deleted from
+`app/globals.css` rather than left parked — nothing had ever referenced
+one.
 
 ## Owner vs. Worker Treatment
 
