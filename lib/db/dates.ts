@@ -84,3 +84,28 @@ export function parseFarmDate(value: string): Date | null {
 export function toDateInputValue(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
+
+/**
+ * The instants bounding the server's civil day `at` falls on, half-open:
+ * `start <= t < end`.
+ *
+ * For **timestamp** columns, not `@db.Date` ones. `Sale.date` is a plain
+ * `DateTime @default(now())`, so "today's sales" cannot compare against the
+ * midnight-UTC value `farmDate()` returns — on any server west of Greenwich
+ * that silently selects the wrong day. These are real local-midnight instants,
+ * built with the local constructor for the same reason `farmDate()` uses the
+ * local getters: the civil day is the server's, not UTC's.
+ *
+ * Half-open rather than inclusive at both ends, because the upper bound is an
+ * instant: `lte` midnight tomorrow would count a sale rung up at exactly
+ * 00:00:00.000 on both days.
+ */
+export function civilDayRange(at: Date = new Date()): {
+  start: Date
+  end: Date
+} {
+  return {
+    start: new Date(at.getFullYear(), at.getMonth(), at.getDate()),
+    end: new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1),
+  }
+}

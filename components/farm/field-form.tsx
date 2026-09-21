@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 
-import { Button } from "@/components/ui/button"
+import { SubmitButton } from "@/components/farm/submit-button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createFieldAction } from "@/app/(app)/land/actions"
 import { MAX_NAME_LENGTH, MAX_NOTE_LENGTH } from "@/lib/land-config"
+import { useSingleFlight } from "@/lib/use-single-flight"
 
 // Owner-only registry work, so it follows the owner treatment: 1px edge,
 // shadow, `p-6`, a primary action sized to its content. A worker never sees
@@ -28,56 +29,58 @@ export function FieldForm() {
   const [locationNote, setLocationNote] = useState("")
   const [feedback, setFeedback] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
-  const [pending, startTransition] = useTransition()
 
-  /** Sends the form and turns each typed result into something to read. */
-  function save() {
-    if (pending || name.trim() === "") return
+  // Sends the form and turns each typed result into something to read, and
+  // reports whether one is in flight. The name check is repeated here because
+  // a disabled button does not stop the Enter key submitting the form.
+  const [submit, pending] = useSingleFlight(async () => {
+    if (name.trim() === "") return
 
     setFeedback(null)
 
-    startTransition(async () => {
-      try {
-        // An empty box means "not given", not zero — the column is nullable and
-        // a field whose size nobody recorded is not a field of nought acres.
-        const parsedAcres = sizeAcres.trim() === "" ? null : Number(sizeAcres)
+    try {
+      // An empty box means "not given", not zero — the column is nullable and
+      // a field whose size nobody recorded is not a field of nought acres.
+      const parsedAcres = sizeAcres.trim() === "" ? null : Number(sizeAcres)
 
-        const result = await createFieldAction({
-          name,
-          sizeAcres: parsedAcres,
-          locationNote,
-        })
+      const result = await createFieldAction({
+        name,
+        sizeAcres: parsedAcres,
+        locationNote,
+      })
 
-        switch (result.status) {
-          case "ok":
-            setName("")
-            setSizeAcres("")
-            setLocationNote("")
-            setFailed(false)
-            setFeedback(`${result.name} added.`)
-            return
-          case "not-owner":
-            setFailed(true)
-            setFeedback("Only the owner can add a field.")
-            return
-          case "invalid":
-            setFailed(true)
-            setFeedback(result.message)
-            return
-          case "not-allowed":
-            setFailed(true)
-            setFeedback("You're not signed in. Open the app again.")
-            return
-        }
-      } catch {
-        setFailed(true)
-        setFeedback("No connection — the field wasn't saved.")
+      switch (result.status) {
+        case "ok":
+          setName("")
+          setSizeAcres("")
+          setLocationNote("")
+          setFailed(false)
+          setFeedback(`${result.name} added.`)
+          return
+        case "not-owner":
+          setFailed(true)
+          setFeedback("Only the owner can add a field.")
+          return
+        case "invalid":
+          setFailed(true)
+          setFeedback(result.message)
+          return
+        case "not-allowed":
+          setFailed(true)
+          setFeedback("You're not signed in. Open the app again.")
+          return
       }
-    })
-  }
+    } catch {
+      setFailed(true)
+      setFeedback("No connection — the field wasn't saved.")
+    }
+  })
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm">
+    <form
+      action={submit}
+      className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm"
+    >
       <h3 className="text-base font-semibold">Add a field</h3>
 
       <div className="flex flex-col gap-2">
@@ -129,13 +132,13 @@ export function FieldForm() {
         </p>
       )}
 
-      <Button
-        onClick={save}
-        disabled={pending || name.trim() === ""}
+      <SubmitButton
+        disabled={name.trim() === ""}
+        pendingLabel="Adding the field…"
         className="self-start rounded-lg"
       >
-        {pending ? "Adding…" : "Add field"}
-      </Button>
-    </div>
+        Add field
+      </SubmitButton>
+    </form>
   )
 }

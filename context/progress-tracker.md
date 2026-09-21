@@ -16,9 +16,24 @@ walkthrough of each screen; see "In Progress".
 
 ## Current Goal
 
-Close out Phase 1 by walking all three screens in a browser, then build
-the three-module owner dashboard — which is now unblocked for the first
-time, since every module has something real to show.
+Close out Phase 1 by walking every screen in a browser. The three-module
+owner dashboard is now built — `/` is the owner's dashboard and a
+worker's router, and Cows & Milk moved to `/milk` — so the walkthroughs
+are the only thing left, and the dashboard has added three of its own to
+the list.
+
+`09-loading-states.md` has since put a pending state on all six write
+actions, on the PIN check and on the post-sign-in handoff. It is built,
+but it adds three more walkthroughs rather than removing any: a double
+tap on checkout is the one check on that list a browser is the only
+place to settle.
+
+`10-land-costs.md` then landed `InputRecord` and the cost-vs-yield
+summary, which is the last write path Phase 1 was missing and the first
+money-bearing one in Land. Its data-layer checks — including invariant 2
+at runtime — were settled against the live database rather than deferred,
+so what it adds to the walkthrough list is one item: the owner-only
+gating seen with a real worker session.
 
 Cows & Milk went first because `MilkRecord` is the simplest shape and
 its `@@unique([date, session])` constraint is the invariant most worth
@@ -340,6 +355,231 @@ back to 0.
 | Extra — a new item starts at zero stock | ✅ stocking the shelf stays a separate explicit act (invariant 3) |
 | Extra — `formatCents` | ✅ 3750 → "37.50", 5 → "0.05" |
 
+- **`07-module-nav-separation.md` — the nav reads as navigation** ✅
+  - **Logged late.** This shipped inside `ffe5c5c` alongside the Shop
+    write path and was never given an entry of its own; it is recorded
+    here at its proper place in the order, checked against the code
+    rather than from memory.
+  - A visual-hierarchy fix, not a feature: on the milk screen the
+    "Logged today" rows and the module-nav rows were the same shape
+    stacked with the same gap, so nothing told a worker that the last
+    two rows left the page entirely.
+  - `components/farm/module-nav.tsx` renders as its own labelled,
+    ruled-off group — `border-t` plus top margin, and an "Other
+    modules" heading deliberately quieter than the `text-lg
+    font-semibold` section heading above it, because it labels a way out
+    of the screen rather than another section of its data.
+  - The separation lives in the component, so every screen that renders
+    it inherits it. No page overrides it: all four call sites pass
+    `assignedModules`, `current` and `treatment` and nothing else.
+  - Rule weight follows the panel-edge logic already in `ui-context.md`
+    — 2px for a worker, 1px for the owner — and is recorded in that
+    file's treatment table.
+
+### Verification of `07-module-nav-separation.md`
+
+| Check | Result |
+| --- | --- |
+| A visible break between "Logged today" and the nav | ✅ `border-t` with `mt-4 pt-8` (worker) / `mt-2 pt-6` (owner), on top of the page's own `gap-8` / `gap-6` |
+| The nav carries a heading identifying it as navigation | ✅ `<h2>Other modules</h2>`, plus `aria-label="Other modules"` on the `<nav>` |
+| The fix lives in `module-nav.tsx` alone | ✅ no call site passes a `className` or any layout prop |
+| Renders correctly for both roles | ✅ both branches of `/milk`, and `/land` and `/shop` |
+| Individual rows unchanged | ✅ icon, label and chevron untouched; only the grouping changed |
+| `npm run build` passes | ✅ exit 0 |
+| `npm run lint` passes | ✅ exit 0 |
+| Since superseded by `08` | The spec named the milk screen as `/`; milk moved to `/milk`, so that is where both roles now see this. The owner's `/` renders no `ModuleNav` at all — the dashboard's metric cards are the cross-module links there |
+
+- **`08-owner-dashboard.md` — the three-module dashboard** ✅ (browser
+  walkthrough outstanding — see "In Progress")
+  - `app/(app)/page.tsx` is now a role branch and nothing else: the
+    owner's dashboard, or `redirect(landingHrefFor(assignedModules))`
+    for a worker. Cows & Milk moved out to `app/(app)/milk/page.tsx`,
+    so all three modules are routed alike and `lib/modules.ts` no
+    longer special-cases `MILK` at `/`.
+  - That redirect is the unit's real fix. Because `/` *was* the milk
+    screen, a worker assigned only `LAND` or only `SHOP` still landed on
+    milk; the assignment was in the schema and the landing ignored it.
+  - Reads: `getTodayMilkTotal` (milk), `getRecentHarvestSummary` (land,
+    grouped by unit — kg and crates do not add up), and
+    `getTodaySalesSummary` / `...WithFinancials` (shop). Low-stock rows
+    reuse the existing `getLowStockItems()` rather than the
+    `getLowStockAlerts()` the spec named, which would have duplicated it
+    exactly.
+  - `lib/db/dates.ts` gained `civilDayRange()`. `Sale.date` is a
+    timestamp, not a `@db.Date` column, so today's sales need a
+    half-open instant range — comparing against `farmDate()`'s
+    midnight-UTC value would have selected the wrong day on any server
+    west of Greenwich.
+  - `components/farm/metric-card.tsx` and `needs-attention-list.tsx`,
+    both presentational: the page owns every query, so the owner-only
+    call sites are all visible in one place.
+  - The needs-attention list has one source, low stock, because it is
+    the only alert with real data behind it. No milk or land alert was
+    invented.
+  - `--sidebar-*` tokens deleted from `app/globals.css` (open question
+    4), and open question 18 settled per screen rather than app-wide
+    (`ui-context.md`, "Viewport").
+
+### Verification of `08-owner-dashboard.md`
+
+| Check | Result |
+| --- | --- |
+| `npm run build` passes | ✅ 11 routes, `/milk` compiled alongside `/` |
+| `npm run lint` passes | ✅ exit 0 |
+| `npx tsc --noEmit` passes | ✅ exit 0 |
+| No `Decimal` in the dashboard's payload | ✅ `getTodaySalesSummaryWithFinancials` returns `revenueCents: number`; `totalAmount` never leaves the helper. Milk liters and harvest quantities are `Float` in the schema, so neither was ever a `Decimal` |
+| The Land card shows a quantity, never a cost | ✅ `getRecentHarvestSummary` selects quantity and unit only, and has no `...WithFinancials` twin to reach for |
+| Shop revenue comes from the privileged helper | ✅ and the safe count-only twin exists unused, as the spec asked |
+| The needs-attention list shows real low-stock items and nothing fabricated | ✅ its only source is `getLowStockItems()`. No milk or land alert was invented; `needs-attention-list.tsx` records why in a comment, so the next person to add one does it with a real source |
+| The owner reaches milk at `/milk`, unchanged in substance | ◐ the route is live on a running dev server — `/milk` is served and the auth middleware redirects it to `/sign-in?redirect_url=…%2Fmilk`, so it resolves rather than 404s. The screen itself is **not yet seen signed in** |
+| The grid is multi-column on desktop and single on phone | ◐ the stylesheet carries `.grid-cols-1` and `.md\:grid-cols-3` inside `@media (min-width:48rem)`, so the classes exist at the intended breakpoint. **Not yet seen rendered at either width** |
+| The needs-attention accent edge renders | ✅ resolved without a session. `.border-l-moss` (byte 18729), `.border-l-gold` (18677) and `.border-l-ochre` (18781) all fall **after** `.border-border` (17537) in the emitted stylesheet, so at equal specificity the accent wins `border-left-color`. The arbitrary-property fallback once suggested for this is not needed |
+| The `--sidebar-*` tokens are gone from the shipped CSS | ✅ zero occurrences of "sidebar" in the built stylesheet, not just in the source |
+| A worker assigned only `LAND` or `SHOP` lands there | ◐ `landingHrefFor()` exercised directly over every assignment shape: `["LAND"]`→`/land`, `["SHOP"]`→`/shop`, `["MILK"]`→`/milk`, `[]`→`/milk`, `["LAND","SHOP"]`→`/land`, and `["SHOP","LAND"]`→`/land` — storage order does not leak, registry order decides. The **logic** is proven; what is unproven is the **wiring**, that `/` calls it and the redirect fires for a real signed-in worker. Needs two Clerk sessions and a direct `assignedModules` edit |
+
+- **`09-loading-states.md` — pending states for the three real waits** ✅
+  (double-tap and post-sign-in checks outstanding — see "In Progress")
+  - `components/farm/submit-button.tsx` — one write-action button for the
+    whole app. It reads `useFormStatus()`, which is React's own
+    action-pending mechanism, so no screen hands it a flag. A wrapper
+    over `components/ui/button.tsx`, never an edit to it: the primitive
+    is generated, and one that reached into form context would stop
+    being a primitive. The hidden label keeps the button's width while
+    the spinner is up, so an owner button sized to its content does not
+    shrink mid-press.
+  - Applied to all six writes: milk `Save entry`, `Save harvest`,
+    `Add field`, `Open cycle`, `Add item`, and the till's
+    `Take payment`. `reset-pin-button.tsx` and
+    `worker-access-button.tsx` were **left alone** — the spec's list did
+    not name them, both already carry a pending label, and both sit
+    behind a confirm step.
+  - `useFormStatus()` only reports inside a `<form action>`, so each of
+    those six now dispatches through one. Five wrap the whole panel,
+    which also gives them keyboard submit; the till wraps only its
+    sticky checkout block, because the cart is React state and wrapping
+    the item grid would put a row of quick-add buttons inside a form.
+  - `lib/use-single-flight.ts` is the half that makes the double tap
+    one submission. Disabling on `pending` is what the worker sees, but
+    `pending` is state: two taps in one frame both read the value from
+    before the first re-render, and Next dispatches the pair one after
+    the other rather than dropping the second ("Sequential dispatch on
+    the client"). The guard has to be synchronous, so it is a ref. On
+    the till that is the difference between one sale and two.
+  - Every form's readiness check moved *into* its handler for the same
+    reason the `<form>` is there: a disabled button does not stop Enter
+    submitting the form around it. `quantity-stepper.tsx` now swallows
+    Enter and commits its draft instead, because the typed digits have
+    not reached the parent yet and submitting would have sent the
+    previous value.
+  - `pin-pad.tsx` gained "checking" as a third state beside offline and
+    lockout — muted type and a turning loader against their destructive
+    type and static icons, and the last try's message is cleared as the
+    next one starts so the two are never on screen together.
+  - `components/farm/sign-in-handoff.tsx` covers the post-sign-in gap.
+    Clerk's `<SignIn />` stays mounted underneath because it is what
+    performs the navigation; the wait is drawn over it. It uses
+    `useAuth()` and not `<Show when="signed-in">`, because in the App
+    Router `Show` resolves server-side and cannot see a session created
+    in this browser a moment ago.
+  - **No `loading.tsx` was added anywhere**, per the spec. The
+    treatment is recorded in `ui-context.md`, "Pending States".
+
+### Verification of `09-loading-states.md`
+
+| Check from the spec | Result |
+| --- | --- |
+| `npm run build` passes | ✅ 11 routes, unchanged set. `/sign-in/[[...sign-in]]` was already `ƒ` before this unit — checked by building the old page — so nothing went from static to dynamic |
+| `npm run lint` passes | ✅ exit 0 |
+| `npx tsc --noEmit` passes | ✅ exit 0 |
+| The spinner actually spins | ✅ resolved in the emitted stylesheet rather than assumed: `.animate-spin`, `@keyframes spin` and `--animate-spin: spin 1s linear infinite` are all present, along with `.invisible`, `.sr-only`, `.relative`, `.inset-0` and `.size-5`. Worth checking because `@theme inline` in `globals.css` could have dropped the animation token, and a spinner that does not turn is not a pending state |
+| No spinner on a route without one of the three waits | ✅ every change is inside a write form, the PIN pad, or the sign-in page. No `loading.tsx` exists in the tree |
+| `components/ui/*` untouched | ✅ `git diff` touches nothing under `components/ui/` |
+| A double tap on a write action submits once | ◐ **not walked in a browser** — that needs a Clerk session, like the rest of "In Progress". What is settled is the mechanism: the guard is a `useRef` checked and set synchronously before the first `await` and released in a `finally`, so a second call in the same frame returns without dispatching. What is unproven is that two real taps arrive as two React events against that same closure |
+| The PIN pad's checking state is distinct from offline and lockout | ◐ distinct in the source by colour (muted vs. `--destructive`), by icon (turning loader vs. static `WifiOff`), and by the message itself; the slots are also disabled, which offline does not do. **Not yet seen on screen** |
+| The post-sign-in gap no longer flashes blank | ◐ the mechanism is confirmed from the SDK rather than guessed: `@clerk/nextjs` 7.9.2 wires `routerPush`/`routerReplace` to Next's router, so the hop to `/` is a soft navigation and this page stays mounted through it — which is what makes an overlay here able to cover the gap at all. **Not yet seen signed in**, and it is the one check of the three that cannot be inferred any further without a session |
+
+- **`10-land-costs.md` — `InputRecord` and cost vs. yield** ✅ (verified
+  against the live database, including invariant 2 at runtime)
+  - Three of the helpers the spec named — `getInputRecords`,
+    `getInputRecordsWithFinancials` and `sumInputCostWithFinancials` —
+    already existed from the open-question-6 work, so they were built on
+    rather than rewritten. The empty-cycle check was re-run anyway, as
+    the spec asked.
+  - `lib/db/land.ts` gained `createInputRecord()` and
+    `getCostVsYieldWithFinancials()`. The write takes `costCents` and
+    converts with `fromCents()`; it catches the same missing-reference
+    codes as `createHarvestRecord` and returns a typed `unknown-cycle`.
+  - **The write selects around `cost`.** Unlike `createHarvestRecord`
+    beside it, the full `InputRecord` row carries a `Prisma.Decimal`,
+    which cannot be serialised into a client component — so the insert
+    passes `select: { id, type, quantity }`, exactly as
+    `createStockItem` does. Invariant 2 in `architecture.md` now says
+    this about write helpers and not only about reads.
+  - **No cost-per-unit figure anywhere.** `getCostVsYieldWithFinancials`
+    returns `{ totalCostCents, harvestByUnit }` and the summary panel
+    shows the money beside the list of quantities. A ratio was not
+    computed even for the single-unit case: it would be a number that
+    silently disappears the first time a second unit is logged, which is
+    worse than never offering one. `code-standards.md` carries the rule.
+  - `lib/land-config.ts` gained `MAX_INPUT_COST_CENTS` (the same figure
+    as `MAX_STOCK_PRICE_CENTS`), `MAX_INPUT_QUANTITY` and
+    `roundInputQuantity()`.
+  - `createInputRecordAction` — `requireOwner()` as the first statement,
+    then `zod`, then the helper, then `refresh()`. `costCents` is
+    validated as an **integer** there rather than left to throw inside
+    `fromCents()`, so a forged POST carrying half a cent comes back as a
+    typed `invalid` and not a 500. Zero is accepted: `cost` is not
+    nullable, so zero is the only way to record own-saved seed or family
+    labour.
+  - `components/farm/input-cost-form.tsx` — `ChoiceGrid` over
+    `InputType` (four schema-fixed values), a cost box read as whole
+    currency, and an optional quantity. `InputType` is imported as a
+    **type** only, per the `session-toggle.tsx` rule, and the on-screen
+    labels are a complete `Record<InputType, string>` so a new enum
+    member becomes a compile error rather than a missing cell.
+  - `parsePriceToCents` moved out of `stock-item-form.tsx` into
+    `lib/money.ts` as `parseAmountToCents`, beside `formatCents`. Land
+    needs the same conversion, and two copies of the code that turns a
+    typed price into cents is two places for money parsing to drift.
+  - `components/farm/cost-vs-yield-summary.tsx` — a server component
+    with no `"use client"`, so a cost figure is never shipped to a
+    worker's bundle even unrendered.
+  - `/land` gates both by `requireOwner(gate)` rather than by
+    `role === "OWNER"` directly, and the per-cycle reads happen **inside**
+    that branch: a worker's render never runs the query, so the cost is
+    absent from the payload rather than hidden in it.
+  - **The optional dashboard card swap was not done**, and not for lack
+    of effort: the helper the spec named to read from,
+    `getCostVsYieldWithFinancials`, is **per cycle**, while the Land card
+    is farm-wide. It would need a new farm-wide cost helper — a second
+    privileged export to gate — which is not the one-card change the
+    spec assumed. Left as its own pass; see "Next Up".
+  - `CropCycle` status transitions untouched, as instructed.
+
+### Verification of `10-land-costs.md`
+
+Run as a temporary root-level probe against the live Postgres
+(`npx tsx --conditions=react-server land-cost-probe.ts`), which created
+its own field, cycle, inputs and harvests and deleted all of them
+afterwards — confirmed by a follow-up count of 0 leftover rows. The
+probe file was removed.
+
+| Check from the spec | Result |
+| --- | --- |
+| A worker cannot create an `InputRecord`, rejected before validation | ✅ two halves, both checked. `requireOwner()` on a constructed `WORKER` gate returns `{ ok: false, status: "not-owner" }` and on an `OWNER` gate returns `ok: true`; and in `createInputRecordAction` the `requireOwner` line is statement 1 while `safeParse` is statement 2, so nothing is parsed or read first |
+| An unknown crop cycle returns `unknown-cycle`, not a crash | ✅ `createInputRecord("cycle-that-does-not-exist", …)` returned `{ ok: false, reason: "unknown-cycle" }` against the real database |
+| `sumInputCostWithFinancials` on an empty cycle is `{ totalCents: 0 }` | ✅ returned exactly that on a freshly opened cycle, and `getCostVsYieldWithFinancials` on the same cycle returned `{ totalCostCents: 0, harvestByUnit: [] }` |
+| `getInputRecords` never carries `cost` or `costCents` | ✅ at runtime, not only at compile time. Its keys came back as `id, clientId, cropCycleId, date, type, quantity, deviceId, createdAt, updatedAt, recordedById` — neither `cost` nor `costCents` present. The privileged twin's keys are the same list plus `costCents`, and still no `cost` |
+| The insert itself returns no cost | ✅ `createInputRecord`'s returned record has keys `id, type, quantity` |
+| Two units show separately, never a blended figure | ✅ a cycle harvested at 40 kg and 12 crates returned `[{kg, 40}, {crates, 12}]`, largest first, and the summary object has exactly two keys — `totalCostCents` and `harvestByUnit` — so there is no ratio field to render |
+| The sum is a real sum | ✅ 12.50 + 30.75 came back as `4325` cents, so `fromCents`/`toCents` round-trip through `Decimal(10, 2)` without drift |
+| A null quantity is accepted | ✅ a `LABOR` entry with `quantity: null` inserted and read back as null — the column is nullable and a cost with no count is a complete entry |
+| No `Decimal` reaches a rendered payload | ✅ every payload — both reads, the summary and the empty sum — `JSON.stringify`d without throwing, and the output contains no `Decimal` internals (`"s":`/`"e":`/`"d":[`) and no `"cost"` key |
+| `npm run build` passes | ✅ 11 routes, unchanged set |
+| `npm run lint` passes | ✅ exit 0 |
+| `npx tsc --noEmit` passes | ✅ exit 0 |
+| The owner-only gate on the new reads | ◐ proven in the source: `getCostVsYieldWithFinancials` is called only inside the `ownerCheck.ok` branch of `/land`, and `requireOwner` is what produces that boolean. **Not yet seen** with a worker's Clerk session, which is the same gap every other screen's walkthrough has |
+
 ## In Progress
 
 Both `04-milk-entry.md` and `05-land-produce.md` are built and verified
@@ -376,6 +616,50 @@ browser work, and it is **not yet done**:
    refusal is confirmed to reach the screen as a message rather than a
    crash.
 
+**Owner dashboard**
+
+8. The metric grid seen at **both** widths: one column on a phone,
+   three across on a computer. Half-checked without a session — the
+   emitted stylesheet does carry `.grid-cols-1` and, inside
+   `@media (min-width:48rem)`, `.md\:grid-cols-3`, so the classes are
+   generated and the breakpoint is the intended 768px. What is still
+   unseen is the rendered page: that the grid is the element those
+   classes land on and nothing above it constrains the width.
+9. A worker assigned only `LAND`, then only `SHOP`, confirmed to land on
+   that module from `/` rather than on milk. This is the routing gap the
+   dashboard unit was written to close. Half-checked without a session:
+   `landingHrefFor()` was run over every assignment shape and each one
+   resolves correctly, including a list stored out of registry order.
+   What that cannot show is the wiring — that `/` calls it and the
+   redirect actually fires for a signed-in worker. That still needs two
+   Clerk sessions and a direct `assignedModules` edit (open question 19
+   is why there is no UI for the edit).
+
+**Pending states**
+
+10. A write action double-tapped fast — "Save entry" and, more to the
+    point, "Take payment" — and confirmed to produce exactly **one**
+    record, by attempting it rather than by trusting the disabled
+    button. The guard is a synchronous ref, so the logic holds on
+    inspection; what the browser adds is that two real taps do arrive
+    as two React events against it.
+11. The PIN pad's "checking" state seen next to its offline and lockout
+    states, to confirm the three read as three.
+12. The post-sign-in handoff walked on a real sign-in, for both an owner
+    (who lands on `/`) and a worker (who is sent on to `/lock` or
+    `/set-pin`, so the wait covers two hops rather than one).
+
+**Land costs**
+
+13. `/land` opened as a **worker**, confirming the Cost vs. yield
+    section and the "Log input cost" form are both absent — and, in the
+    page source rather than only on screen, that no cost figure is in
+    the payload at all. That last part is invariant 2 at the last mile,
+    the same check `06-shop.md` left outstanding for its history rows.
+14. An input cost logged through the real form, then the cycle's summary
+    confirmed to move. The data layer is proven; what a browser adds is
+    that `refresh()` puts the new total on screen without a reload.
+
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
 re-render them in the action's own response. If a saved entry does not
@@ -386,16 +670,17 @@ test can reach.
 ## Next Up
 
 1. Finish the walkthroughs above.
-2. **The three-module owner dashboard** — the metric card grid and the
-   cross-module "needs attention" list. Unblocked for the first time:
-   all three modules now have data worth showing. Per
-   `ai-workflow-rules.md`, Phase 3 (PowerSync offline sync) does not
-   start until Phase 1 is complete.
-3. Land's own `InputRecord` — cost entry and the cost-vs-yield
-   reporting it feeds. Left out of `05-land-produce.md` because it
-   forced open question 6; that is now answered, so it is unblocked
-   whenever it is wanted.
-4. The animal registry, health records and breeding records; the
+2. **The dashboard's Land card, as a cost figure.** Deferred out of
+   `10-land-costs.md` on purpose. The spec offered it as a one-card
+   change reading `getCostVsYieldWithFinancials`, but that helper is
+   per cycle and the card is farm-wide, so it needs a new farm-wide
+   cost helper — which means a second privileged export to gate, and a
+   decision about what the card should say when cycles were harvested
+   in different units. Worth doing, but it is its own unit, not a line
+   change. Whoever picks it up should decide first whether the card
+   shows spend, or spend against the headline unit, and record that in
+   `ui-context.md` before writing it.
+3. The animal registry, health records and breeding records; the
    `CropCycle` status transition (`PLANNED` → `GROWING` → `HARVESTED`).
    All deliberately left out of the write paths because they neither
    block them nor share them.
@@ -411,9 +696,12 @@ test can reach.
    by className so `components/ui/button.tsx` stays as generated.
 3. ~~**App metadata.**~~ Resolved — `app/layout.tsx` now carries the real
    title and description.
-4. **Sidebar tokens.** `--sidebar-*` variables are mapped to the
-   palette for completeness, but no layout in `ui-context.md` uses a
-   sidebar. Drop them if a sidebar never materialises.
+4. ~~**Sidebar tokens.**~~ Resolved — a sidebar never materialised. The
+   owner dashboard settled that the app gets none (open question 18),
+   because a persistent module rail would duplicate `module-nav.tsx`,
+   so all sixteen `--sidebar-*` definitions and their `--color-sidebar-*`
+   mappings were deleted from `app/globals.css`. Nothing had ever
+   referenced one.
 5. ~~**Where the worker cost/price filter lives.**~~ Resolved — it lives
    inside `lib/db/` as two exports per financial query. See the
    decision below; `architecture.md` invariant 2 and
@@ -520,7 +808,18 @@ test can reach.
    there is only ever one season's worth. The moment the `PLANNED` →
    `GROWING` → `HARVESTED` transition lands, the picker needs either the
    planting year or a filter to open cycles.
-18. **Nothing defines what any screen looks like on a computer.**
+18. ~~**Nothing defines what any screen looks like on a computer.**~~
+   Resolved — settled before the dashboard was built, as the question
+   itself asked for. The answer is **per screen, not app-wide**: worker
+   task screens keep the centred `max-w-xl` phone column, the owner's
+   module screens keep `max-w-2xl`, and only the dashboard widens, to
+   `max-w-5xl`, because it is the one screen with a 3-across grid and
+   three cards in a phone column are just a list. No sidebar — it would
+   duplicate `module-nav.tsx` — which is what closed open question 4.
+   Recorded in `ui-context.md` under "Viewport". The original question
+   follows.
+
+   **Nothing defines what any screen looks like on a computer.**
    `project-overview.md` puts "a PWA usable on both phone and computer"
    in scope, and `architecture.md` lists the platform as phone **and**
    computer. But every screen built so far is phone-shaped: a single
@@ -588,6 +887,26 @@ test can reach.
    it to reconcile offline writes. Building a competing mechanism now
    would mean two ideas about what `clientId` means. Do it **with**
    Phase 3, where the same key serves both.
+25. **An input quantity has no unit.** `InputRecord.quantity` is a
+   `Float?` and the model has no unit column, unlike `HarvestRecord`
+   which carries one. So "20" against a `FERTILIZER` entry could be
+   kilos, bags or litres, and nothing in the schema or the context files
+   says which. The consequences today: `MAX_INPUT_QUANTITY` cannot be a
+   meaningful limit, nothing can aggregate the column across records,
+   and the input-cost form says so on screen rather than implying a
+   unit it does not store — "no unit is stored with this number, it is a
+   count for your own reference". The cost is what the cost-vs-yield
+   summary reports, and the cost has no such ambiguity.
+
+   Three ways out, in increasing cost: leave it as a per-owner memo and
+   say so (what it does now); add a `unit` column mirroring
+   `HarvestRecord` and a fixed set beside `HARVEST_UNITS`; or make the
+   unit a property of `InputType` (seed in kg, labour in hours), which
+   reads best but bakes a rule into the enum. This is the same shape of
+   question as 16 — the harvest unit set being a guess — and probably
+   wants the same answer at the same time. A schema change, so per
+   `ai-workflow-rules.md` it is a deliberate reviewed decision, not
+   something to fold into a feature unit.
 
 ## Architecture Decisions
 
@@ -922,11 +1241,24 @@ test can reach.
   every price tag is exactly the sort of invented product fact
   `ai-workflow-rules.md` forbids. `formatCents` groups and fixes to two
   decimals; naming the currency later is a one-line change.
-- **The owner's home is one module, not the dashboard.** The spec was
-  explicit and it is the right call: a three-module dashboard built now
-  would have two cards reading from modules with no write path. The
-  owner's "Worker PINs" section stays on that page, because removing it
-  would take away the only route out of a forgotten PIN.
+- **The owner's home was one module, and is now the dashboard.**
+  Through the milk, land and shop units the owner's home was the Cows &
+  Milk screen, because a three-module dashboard built then would have
+  had two cards reading from modules with no write path. All three have
+  one now, so `/` became the dashboard and Cows & Milk moved to `/milk`
+  beside `/land` and `/shop`.
+
+  That move also closed a routing gap the old arrangement hid: because
+  `/` *was* the milk screen, a worker assigned only `LAND` or only
+  `SHOP` still landed on milk and had to find their way out through the
+  nav. `assignedModules` existed in the schema and the landing ignored
+  it. `/` is now a role branch only — the dashboard, or
+  `landingHrefFor()` sending a worker to the first module they are
+  actually assigned.
+
+  The "Worker access" section moved with the dashboard rather than
+  staying with the module: it was only ever on that screen by virtue of
+  it being home, and it is still the only route out of a forgotten PIN.
 
 ## Session Notes
 
@@ -937,6 +1269,18 @@ test can reach.
   `-b <base>` and `-p <preset>` to run unattended.
 - `next dev` rewrites the `nextjs-agent-rules` block in `AGENTS.md`;
   committing that change alongside real work keeps the tree clean.
+- An icon inside a `Button` must size itself with `size-*`, not
+  `h-5 w-5`. The primitive carries
+  `[&_svg:not([class*='size-'])]:size-4`, and that descendant selector
+  out-specifies a plain `.h-5`, so `h-5 w-5` silently renders at 16px.
+  Naming the class `size-5` both sets the size and opts out of the
+  rule. `sale-terminal.tsx`'s trash icon predates this note and is
+  still on `h-5 w-5`, so it is drawn at 16px.
+- `SignedIn`, `SignedOut` and `Protect` were **removed** in Clerk Core 3
+  (`@clerk/nextjs@7`) and now throw when rendered. `<Show when=…>`
+  replaces them — but in the App Router `Show` is a server component
+  that awaits `auth()`, so it cannot react to a session created in the
+  browser. Client-side auth state is `useAuth()`.
 - `--font-sans` is declared in an **unlayered** `:root` block in
   `app/globals.css`, which is what makes it win over the
   self-referential `--font-sans: var(--font-sans)` Tailwind emits into

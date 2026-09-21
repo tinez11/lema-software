@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useState } from "react"
 import { AlertTriangleIcon, CheckCircle2Icon, Trash2Icon, WifiOffIcon } from "lucide-react"
 
 import { QuantityStepper } from "@/components/farm/quantity-stepper"
 import { StockItemGrid } from "@/components/farm/stock-item-grid"
 import type { SellableItem } from "@/components/farm/stock-item-grid"
+import { SubmitButton } from "@/components/farm/submit-button"
 import { Button } from "@/components/ui/button"
 import { recordSaleAction } from "@/app/(app)/shop/actions"
 import { formatCents } from "@/lib/money"
@@ -14,6 +15,7 @@ import {
   SALE_QUANTITY_DECIMALS,
   SALE_QUANTITY_STEP,
 } from "@/lib/shop-config"
+import { useSingleFlight } from "@/lib/use-single-flight"
 import { cn } from "@/lib/utils"
 
 // The POS screen from `ui-context.md`: a tappable item grid, a running sale
@@ -55,7 +57,6 @@ export function SaleTerminal({ items, treatment }: SaleTerminalProps) {
 
   const [cart, setCart] = useState<CartLine[]>([])
   const [feedback, setFeedback] = useState<Feedback>({ kind: "idle" })
-  const [pending, startTransition] = useTransition()
 
   const totalCents = useMemo(
     () =>
@@ -118,77 +119,81 @@ export function SaleTerminal({ items, treatment }: SaleTerminalProps) {
     setCart((current) => current.filter((line) => line.item.id !== itemId))
   }
 
-  /** Sends the sale and turns each typed result into something to read. */
-  function checkout() {
-    if (cart.length === 0 || pending) return
+  // Sends the sale and turns each typed result into something to read, and
+  // reports whether one is in flight.
+  //
+  // This is the button where the guard in `useSingleFlight` earns its keep: a
+  // second dispatch is a second sale taken in cash, and open question 24 is
+  // already about the one retry case the client cannot prevent. Double-tapping
+  // is not that case, and is not allowed to become it.
+  const [submit, pending] = useSingleFlight(async () => {
+    if (cart.length === 0) return
 
     setFeedback({ kind: "idle" })
 
-    startTransition(async () => {
-      try {
-        const result = await recordSaleAction({
-          lines: cart.map((line) => ({
-            stockItemId: line.item.id,
-            quantity: line.quantity,
-          })),
-        })
+    try {
+      const result = await recordSaleAction({
+        lines: cart.map((line) => ({
+          stockItemId: line.item.id,
+          quantity: line.quantity,
+        })),
+      })
 
-        switch (result.status) {
-          case "ok":
-            setCart([])
-            setFeedback({
-              kind: "sold",
-              message: `Sale recorded — ${formatCents(result.totalCents)} taken.`,
-            })
-            return
-          case "insufficient-stock":
-            setFeedback({
-              kind: "blocked",
-              message:
-                `Not enough ${result.name}: ${result.available} left, ` +
-                `${result.requested} on the sale. Nothing was recorded — ` +
-                `adjust the line and ring it again.`,
-            })
-            return
-          case "unknown-item":
-            setFeedback({
-              kind: "blocked",
-              message:
-                "One of these items is no longer stocked. Reload the till and ring it again.",
-            })
-            return
-          case "busy":
-            setFeedback({
-              kind: "blocked",
-              message:
-                "Another till was using these items. Nothing was recorded — ring it again.",
-            })
-            return
-          case "empty-sale":
-            setFeedback({ kind: "blocked", message: "There's nothing on the sale." })
-            return
-          case "invalid":
-            setFeedback({ kind: "blocked", message: result.message })
-            return
-          case "not-assigned":
-            setFeedback({
-              kind: "blocked",
-              message:
-                "You're not assigned to the Shop. Ask the owner if that's wrong.",
-            })
-            return
-          case "not-allowed":
-            setFeedback({
-              kind: "blocked",
-              message: "You're not signed in to take a sale. Open the app again.",
-            })
-            return
-        }
-      } catch {
-        setFeedback({ kind: "offline" })
+      switch (result.status) {
+        case "ok":
+          setCart([])
+          setFeedback({
+            kind: "sold",
+            message: `Sale recorded — ${formatCents(result.totalCents)} taken.`,
+          })
+          return
+        case "insufficient-stock":
+          setFeedback({
+            kind: "blocked",
+            message:
+              `Not enough ${result.name}: ${result.available} left, ` +
+              `${result.requested} on the sale. Nothing was recorded — ` +
+              `adjust the line and ring it again.`,
+          })
+          return
+        case "unknown-item":
+          setFeedback({
+            kind: "blocked",
+            message:
+              "One of these items is no longer stocked. Reload the till and ring it again.",
+          })
+          return
+        case "busy":
+          setFeedback({
+            kind: "blocked",
+            message:
+              "Another till was using these items. Nothing was recorded — ring it again.",
+          })
+          return
+        case "empty-sale":
+          setFeedback({ kind: "blocked", message: "There's nothing on the sale." })
+          return
+        case "invalid":
+          setFeedback({ kind: "blocked", message: result.message })
+          return
+        case "not-assigned":
+          setFeedback({
+            kind: "blocked",
+            message:
+              "You're not assigned to the Shop. Ask the owner if that's wrong.",
+          })
+          return
+        case "not-allowed":
+          setFeedback({
+            kind: "blocked",
+            message: "You're not signed in to take a sale. Open the app again.",
+          })
+          return
       }
-    })
-  }
+    } catch {
+      setFeedback({ kind: "offline" })
+    }
+  })
 
   return (
     <div className="flex flex-col gap-6">
@@ -271,25 +276,32 @@ export function SaleTerminal({ items, treatment }: SaleTerminalProps) {
       </section>
 
       {/* Sticky, per ui-context.md: at a till the total and the way to finish
-          have to stay on screen while the list above it grows. */}
-      <div className="sticky bottom-0 -mx-5 flex flex-col gap-3 border-t-2 border-border bg-background px-5 py-4 sm:mx-0 sm:rounded-2xl sm:border-2">
+          have to stay on screen while the list above it grows.
+
+          The `<form>` is only this block, not the whole till: the cart is React
+          state, so there is nothing above to submit, and wrapping the item grid
+          would put a row of quick-add buttons inside a form. */}
+      <form
+        action={submit}
+        className="sticky bottom-0 -mx-5 flex flex-col gap-3 border-t-2 border-border bg-background px-5 py-4 sm:mx-0 sm:rounded-2xl sm:border-2"
+      >
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-lg font-semibold">Total</span>
           <span className="text-3xl font-semibold tabular-nums text-ochre">
             {formatCents(totalCents)}
           </span>
         </div>
-        <Button
-          onClick={checkout}
-          disabled={cart.length === 0 || pending}
+        <SubmitButton
+          disabled={cart.length === 0}
+          pendingLabel="Recording the sale…"
           className="h-14 w-full rounded-xl text-lg font-semibold"
         >
-          {pending ? "Recording…" : "Take payment"}
-        </Button>
+          Take payment
+        </SubmitButton>
         <p className="text-center text-sm text-muted-foreground">
           Cash only — no account or change is recorded.
         </p>
-      </div>
+      </form>
     </div>
   )
 }

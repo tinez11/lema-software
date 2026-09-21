@@ -5,6 +5,7 @@ import type { MilkRecord, MilkSession } from "@prisma/client"
 
 import { prisma } from "./client"
 import { farmDate } from "./dates"
+import { roundLiters } from "../milk-config"
 
 // Herd-total milk production. One record per date and session, guaranteed by
 // the `@@unique([date, session])` constraint on `MilkRecord` — never per
@@ -108,6 +109,34 @@ export function sumMilkLiters(options: { from?: Date; to?: Date } = {}) {
         : undefined,
     _sum: { liters: true },
   })
+}
+
+/**
+ * Today's herd total and how many entries make it up — a plain quantity, no
+ * financial concern, so there is one path and no owner-only twin.
+ *
+ * `today` is passed in rather than read here: `MilkRecord.date` is `@db.Date`,
+ * and the caller already holds the `farmDate()` value the rest of its page is
+ * rendered against. Two independent `farmDate()` calls either side of midnight
+ * would disagree.
+ *
+ * A day with no milking sums to 0, not null — "nothing logged" is zero liters,
+ * and a nullable number invites a `?? 0` one caller will forget. Rounded
+ * through `roundLiters` so a sum of half-liter readings shows 47.5 rather than
+ * 47.499999999999996.
+ */
+export async function getTodayMilkTotal(
+  today: Date
+): Promise<{ liters: number; entries: number }> {
+  const [{ _sum }, entries] = await Promise.all([
+    prisma.milkRecord.aggregate({
+      where: { date: today },
+      _sum: { liters: true },
+    }),
+    prisma.milkRecord.count({ where: { date: today } }),
+  ])
+
+  return { liters: roundLiters(_sum.liters ?? 0), entries }
 }
 
 // ───────────── Writes ─────────────

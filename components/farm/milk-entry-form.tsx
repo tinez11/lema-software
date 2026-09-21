@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { AlertTriangleIcon, CheckCircle2Icon, WifiOffIcon } from "lucide-react"
 import type { MilkSession } from "@prisma/client"
 
 import { QuantityStepper } from "@/components/farm/quantity-stepper"
 import { SessionToggle, sessionLabel } from "@/components/farm/session-toggle"
-import { Button } from "@/components/ui/button"
+import { SubmitButton } from "@/components/farm/submit-button"
 import { Label } from "@/components/ui/label"
 import { logMilkAction } from "@/app/(app)/milk/actions"
 import {
@@ -15,6 +15,7 @@ import {
   MILK_LITERS_STEP,
   MIN_MILK_LITERS,
 } from "@/lib/milk-config"
+import { useSingleFlight } from "@/lib/use-single-flight"
 import { cn } from "@/lib/utils"
 
 // The one write screen in Cows & Milk, shared by both roles: the worker meets
@@ -56,66 +57,70 @@ export function MilkEntryForm({
   const [session, setSession] = useState<MilkSession>(defaultSession)
   const [liters, setLiters] = useState(0)
   const [feedback, setFeedback] = useState<Feedback>({ kind: "idle" })
-  const [pending, startTransition] = useTransition()
 
   // 0 is a legal stepper position but not a legal entry: an empty churn is not
   // a milking. The server draws the same line, in `lib/milk-config.ts`.
   const ready = liters >= MIN_MILK_LITERS
 
-  /** Sends the entry and turns each typed result into something to read. */
-  function save() {
-    if (!ready || pending) return
+  // Sends the entry and turns each typed result into something to read, and
+  // reports whether one is in flight. The readiness check is repeated here
+  // rather than left to the button: a disabled button does not stop the Enter
+  // key submitting the form around it.
+  const [submit, pending] = useSingleFlight(async () => {
+    if (!ready) return
 
     setFeedback({ kind: "idle" })
 
-    startTransition(async () => {
-      try {
-        const result = await logMilkAction({ session, liters })
+    try {
+      const result = await logMilkAction({ session, liters })
 
-        switch (result.status) {
-          case "ok":
-            setLiters(0)
-            setFeedback({
-              kind: "saved",
-              message: `${sessionLabel(session)} logged — ${result.liters} L.`,
-            })
-            return
-          case "duplicate":
-            setFeedback({
-              kind: "blocked",
-              message:
-                `${sessionLabel(session)} is already logged today at ` +
-                `${result.existing.liters} L by ${result.existing.recordedByName}. ` +
-                `Correct that entry instead of adding a second one.`,
-            })
-            return
-          case "invalid":
-            setFeedback({ kind: "blocked", message: result.message })
-            return
-          case "not-assigned":
-            setFeedback({
-              kind: "blocked",
-              message:
-                "You're not assigned to Cows & Milk. Ask the owner if that's wrong.",
-            })
-            return
-          case "not-allowed":
-            setFeedback({
-              kind: "blocked",
-              message: "You're not signed in to log milk. Open the app again.",
-            })
-            return
-        }
-      } catch {
-        // Same call as the PIN screens make: a thrown action is a lost
-        // connection far more often than a broken server.
-        setFeedback({ kind: "offline" })
+      switch (result.status) {
+        case "ok":
+          setLiters(0)
+          setFeedback({
+            kind: "saved",
+            message: `${sessionLabel(session)} logged — ${result.liters} L.`,
+          })
+          return
+        case "duplicate":
+          setFeedback({
+            kind: "blocked",
+            message:
+              `${sessionLabel(session)} is already logged today at ` +
+              `${result.existing.liters} L by ${result.existing.recordedByName}. ` +
+              `Correct that entry instead of adding a second one.`,
+          })
+          return
+        case "invalid":
+          setFeedback({ kind: "blocked", message: result.message })
+          return
+        case "not-assigned":
+          setFeedback({
+            kind: "blocked",
+            message:
+              "You're not assigned to Cows & Milk. Ask the owner if that's wrong.",
+          })
+          return
+        case "not-allowed":
+          setFeedback({
+            kind: "blocked",
+            message: "You're not signed in to log milk. Open the app again.",
+          })
+          return
       }
-    })
-  }
+    } catch {
+      // Same call as the PIN screens make: a thrown action is a lost
+      // connection far more often than a broken server.
+      setFeedback({ kind: "offline" })
+    }
+  })
 
   return (
-    <section
+    // A real `<form>`, though the values travel as React state rather than as
+    // `FormData`: React's action mechanism is what `SubmitButton` reads its own
+    // pending state from, and it is what lets the keyboard submit at all.
+    <form
+      action={submit}
       className={cn(
         "flex flex-col rounded-2xl bg-card",
         worker
@@ -179,23 +184,23 @@ export function MilkEntryForm({
         <FeedbackNote feedback={feedback} worker={worker} />
       )}
 
-      <Button
-        onClick={save}
-        disabled={!ready || pending}
+      <SubmitButton
+        disabled={!ready}
+        pendingLabel="Saving the entry…"
         className={cn(
           "h-14 rounded-xl text-lg font-semibold",
           worker ? "w-full" : "self-start px-8"
         )}
       >
-        {pending ? "Saving…" : "Save entry"}
-      </Button>
+        Save entry
+      </SubmitButton>
 
       {!ready && (
         <p className="-mt-4 text-sm text-muted-foreground">
           Add the liters collected to save.
         </p>
       )}
-    </section>
+    </form>
   )
 }
 

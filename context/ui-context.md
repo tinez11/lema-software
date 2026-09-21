@@ -90,11 +90,25 @@ defaults to next-themes' `system`.
 - **Owner dashboard**: vertical stack — greeting header, a 3-across
   equal-weight metric card grid (one per module, collapsing to a
   single column on phone widths), and a single "needs attention" list
-  below that cuts across all three modules.
+  below that cuts across all three modules. Built at `/`, in a
+  `max-w-5xl` container — the one screen that is not a phone-width
+  column; see "Viewport" below. The needs-attention list currently has
+  one source, low stock, because that is the only alert with real data
+  behind it.
 - **Module home screens**: header with back navigation, a small tab
   set for sub-areas (e.g. Milk / Animals / Health), one dominant
   primary-action button (e.g. "Log milk"), and a browsable history
   list beneath it.
+
+  `/land` adds an owner-only **Cost vs. yield** section between the
+  harvest history and the module nav — one panel per crop cycle, in the
+  owner treatment, showing input cost against the quantities harvested.
+  The quantities stay one row per unit and are **never divided into the
+  cost**: kg and crates do not add up, so there is no cost-per-unit
+  figure on that panel at all. Its section sits above the nav because it
+  is data about the module, not a way out of it. A worker's render never
+  runs the query, so the figure is absent from the payload rather than
+  hidden in it.
 - **Shop / POS screen**: a tappable item grid for quick-add, a running
   "current sale" summary panel with per-line quantity steppers, and a
   sticky, high-contrast checkout button at the bottom.
@@ -117,6 +131,28 @@ defaults to next-themes' `system`.
 - Owner-facing screens may use a softer, layered visual treatment;
   worker-facing screens stay flat and high-contrast, since speed and
   outdoor legibility matter more than mood there.
+
+## Viewport
+
+The app is a PWA on both phone and computer (`architecture.md`), but the
+two do not get the same layout, and the split is per screen rather than
+app-wide. This answers open question 18, settled before the dashboard was
+built because that is the screen where the difference costs something.
+
+| Screen | Container | Why |
+| --- | --- | --- |
+| Worker task screens | `max-w-xl`, centred | One task at a time, large controls. Width buys nothing. |
+| Owner module screens | `max-w-2xl`, centred | A form and a history list; a second column would be padding. |
+| Owner dashboard | `max-w-5xl`, centred | The only screen with a 3-across grid. Three cards in a phone column are just a list. |
+
+The dashboard grid is `grid-cols-1` below `md` and `grid-cols-3` from `md`
+up. Every other screen keeps the centred phone column it already had.
+
+**No sidebar.** A persistent module rail would duplicate
+`components/farm/module-nav.tsx`, which already has its own deliberate
+treatment. The `--sidebar-*` tokens shadcn generated were deleted from
+`app/globals.css` rather than left parked — nothing had ever referenced
+one.
 
 ## Owner vs. Worker Treatment
 
@@ -147,6 +183,44 @@ is also full width; on owner screens it sizes to its content.
 
 Sibling controls that must match that height — a PIN field, a quantity
 stepper — use `h-14` too, so a worker's row of targets is one size.
+
+## Pending States
+
+Three moments in this app make someone wait, and each has exactly one
+treatment. There is no fourth: a screen that holds none of the three gets no
+skeleton and no spinner.
+
+**A write in flight.** The button that started it keeps its size and swaps its
+label for a turning loader at `size-5`, while the form's own controls —
+steppers, choice grids, selects — disable for the duration.
+`components/farm/submit-button.tsx` is the one button that does this, and it
+does it on every write: save entry, save harvest, add field, open cycle, add
+item, take payment. The label stays in the layout while it is hidden, so a
+button sized to its content does not shrink out from under the thumb pressing
+it. Worker buttons keep their `h-14` full width and owner buttons keep whatever
+size they already had on each screen — the pending state does not change the
+owner/worker split, it inherits it.
+
+**A PIN being checked.** `pin-pad.tsx` says "Checking your PIN…" in **muted**
+type with a turning loader, in the same region that carries its offline and
+lockout messages — both of which are `--destructive` with a static icon. The
+three are told apart by colour and by motion on purpose. Offline means "the
+check cannot be made", lockout means "the pad is shut", and checking means "the
+check is running right now"; a slow connection must not be readable as no
+connection, because the worker's response to those two is not the same.
+
+**The gap after signing in.** Clerk finishing a sign-in and this app knowing
+what the person may see are two different moments, with a router-cache
+invalidation, `resolveAuthGate()` and possibly a further hop to `/set-pin` or
+`/lock` in between. `components/farm/sign-in-handoff.tsx` covers that one gap
+with a branded full-screen wait — the app's name, a loader, "Opening your
+screen…" — instead of leaving Clerk's card to empty out. It is scoped to that
+handoff and nothing else.
+
+**No route-level `loading.tsx`, anywhere.** A skeleton per route would be a
+guess about which routes are slow. A page that turns out to be genuinely slow
+in use is a separately justified fix for that page, not a reason to put a
+placeholder in front of every route first.
 
 ## Entry Controls
 

@@ -6,11 +6,13 @@ import type {
   CropCycleStatus,
   Field,
   HarvestRecord,
+  InputType,
 } from "@prisma/client"
 
 import { prisma } from "./client"
 import { farmDate } from "./dates"
-import { toCents } from "./money"
+import { fromCents, toCents } from "./money"
+import { roundQuantity } from "../land-config"
 
 // Thin read helpers for Land & Produce: the field registry, crop cycles, and
 // the input/harvest records attached to a cycle.
@@ -157,6 +159,47 @@ export async function sumInputCostWithFinancials(
   return { totalCents: _sum.cost ? toCents(_sum.cost) : 0 }
 }
 
+export type CostVsYield = {
+  totalCostCents: number
+  harvestByUnit: { unit: string; quantity: number }[]
+}
+
+/**
+ * Owner-only: what one cycle cost against what it produced. Verify
+ * `role === OWNER` first.
+ *
+ * **No ratio.** The yield stays a list of per-unit quantities and is never
+ * divided into the cost, because `HarvestRecord.unit` is one of
+ * `HARVEST_UNITS` and a cycle picked in both kg and bags has no single blended
+ * figure that means anything — the same reason `sumHarvestQuantity()` groups
+ * instead of summing. A cost-per-unit computed only when one unit happens to
+ * be present would also be a number that silently disappears the first time a
+ * second unit is logged, which is worse than never offering it.
+ *
+ * So this is the comparison, not a computation of it: the money that went in,
+ * beside the quantities that came out. Largest quantity first, matching
+ * `getRecentHarvestSummary`, so a caller showing one line shows the unit that
+ * dominated.
+ */
+export async function getCostVsYieldWithFinancials(
+  cropCycleId: string
+): Promise<CostVsYield> {
+  const [cost, harvest] = await Promise.all([
+    sumInputCostWithFinancials(cropCycleId),
+    sumHarvestQuantity(cropCycleId),
+  ])
+
+  return {
+    totalCostCents: cost.totalCents,
+    harvestByUnit: harvest
+      .map((row) => ({
+        unit: row.unit,
+        quantity: roundQuantity(row._sum.quantity ?? 0),
+      }))
+      .sort((a, b) => b.quantity - a.quantity),
+  }
+}
+
 // ───────────── Harvests (quantities only, no financial columns) ─────────────
 
 /**
@@ -183,6 +226,48 @@ export function sumHarvestQuantity(cropCycleId: string) {
     where: { cropCycleId },
     _sum: { quantity: true },
   })
+}
+
+/**
+ * Recent harvest activity, grouped by the unit each record was logged in.
+ *
+ * Grouped rather than summed because `HarvestRecord.unit` is one of
+ * `HARVEST_UNITS` — kg, bags, crates, bunches — and adding 12 crates to 40 kg
+ * produces a number that means nothing. `sumHarvestQuantity()` groups for the
+ * same reason. Largest total first, so a caller showing one headline figure
+ * shows the unit that dominated the period.
+ *
+ * Quantity only, and it stays that way now that cost exists: this is the
+ * dashboard's farm-wide activity figure, and there is deliberately no
+ * financial twin of it to forget to gate. Cost is read per cycle, by
+ * `getCostVsYieldWithFinancials()` above, behind an owner check.
+ */
+export async function getRecentHarvestSummary(
+  options: { from?: Date } = {}
+): Promise<{
+  totals: { unit: string; quantity: number }[]
+  entries: number
+}> {
+  const where = options.from ? { date: { gte: options.from } } : undefined
+
+  const [grouped, entries] = await Promise.all([
+    prisma.harvestRecord.groupBy({
+      by: ["unit"],
+      where,
+      _sum: { quantity: true },
+    }),
+    prisma.harvestRecord.count({ where }),
+  ])
+
+  return {
+    totals: grouped
+      .map((row) => ({
+        unit: row.unit,
+        quantity: roundQuantity(row._sum.quantity ?? 0),
+      }))
+      .sort((a, b) => b.quantity - a.quantity),
+    entries,
+  }
 }
 
 /**
@@ -287,6 +372,68 @@ export async function createCropCycle(
     if (!isMissingReference(error)) throw error
 
     return { ok: false, reason: "unknown-field" }
+  }
+}
+
+/**
+ * What an insert hands back. Not the `InputRecord` row: that carries `cost` as
+ * a `Prisma.Decimal`, which is not serialisable into a client component, so the
+ * write selects its way around it exactly as `createStockItem` does. The
+ * caller already holds the cost it sent, in cents, and has no need to be told
+ * it again in another form.
+ */
+export type CreatedInputRecord = {
+  id: string
+  type: InputType
+  quantity: number | null
+}
+
+export type CreateInputRecordResult =
+  | { ok: true; record: CreatedInputRecord }
+  | { ok: false; reason: "unknown-cycle" }
+
+/**
+ * Logs what went into a cycle and what it cost. Owner-only, and that check
+ * lives in `app/(app)/land/actions.ts` beside the two other owner-only writes
+ * — this helper takes no role parameter, per `code-standards.md`.
+ *
+ * `costCents` arrives as whole cents and `fromCents()` converts it on the way
+ * in, which is the only direction money is allowed to travel here.
+ *
+ * `quantity` is nullable because the column is: an hour of labour or a lump
+ * purchase may have a cost and no meaningful count. It also has no unit
+ * anywhere in the schema — see open question 25.
+ *
+ * A plain insert, like `createHarvestRecord`: nothing about an input is unique
+ * per day, and buying fertilizer twice in a week is correct data.
+ */
+export async function createInputRecord(
+  cropCycleId: string,
+  date: Date,
+  type: InputType,
+  quantity: number | null,
+  costCents: number,
+  recordedById: string
+): Promise<CreateInputRecordResult> {
+  try {
+    return {
+      ok: true,
+      record: await prisma.inputRecord.create({
+        data: {
+          cropCycleId,
+          date: farmDate(date),
+          type,
+          quantity,
+          cost: fromCents(costCents),
+          recordedById,
+        },
+        select: { id: true, type: true, quantity: true },
+      }),
+    }
+  } catch (error) {
+    if (!isMissingReference(error)) throw error
+
+    return { ok: false, reason: "unknown-cycle" }
   }
 }
 

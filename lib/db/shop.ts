@@ -3,6 +3,7 @@ import "server-only"
 import { Prisma } from "@prisma/client"
 
 import { prisma } from "./client"
+import { civilDayRange } from "./dates"
 import { fromCents, toCents } from "./money"
 import { INITIAL_STOCK_QUANTITY } from "../shop-config"
 
@@ -337,6 +338,53 @@ export async function getSalesHistoryWithFinancials(
       subtotalCents: toCents(subtotal),
     })),
   }))
+}
+
+/**
+ * How many sales were rung up today — a count, no money. The safe path
+ * (invariant 2); `getTodaySalesSummaryWithFinancials()` is the owner's twin.
+ *
+ * `Sale.date` is a timestamp, not a `@db.Date` column, so this compares
+ * against a half-open instant range rather than a civil-day value. See
+ * `civilDayRange()`.
+ *
+ * Nothing calls this yet, and that is deliberate: the dashboard that reads
+ * today's shop figures is the owner's, so it takes the privileged twin. This
+ * is what a non-owner path would get, and it exists so that path does not have
+ * to be invented in a hurry later.
+ */
+export async function getTodaySalesSummary(
+  at: Date = new Date()
+): Promise<{ sales: number }> {
+  const { start, end } = civilDayRange(at)
+
+  return {
+    sales: await prisma.sale.count({ where: { date: { gte: start, lt: end } } }),
+  }
+}
+
+/**
+ * Owner-only: the same count plus today's takings in whole cents. Verify
+ * `role === OWNER` before calling.
+ *
+ * A day with no sales is 0 revenue, not null, matching
+ * `sumSalesRevenueWithFinancials()`.
+ */
+export async function getTodaySalesSummaryWithFinancials(
+  at: Date = new Date()
+): Promise<{ sales: number; revenueCents: number }> {
+  const { start, end } = civilDayRange(at)
+  const where = { date: { gte: start, lt: end } }
+
+  const [sales, { _sum }] = await Promise.all([
+    prisma.sale.count({ where }),
+    prisma.sale.aggregate({ where, _sum: { totalAmount: true } }),
+  ])
+
+  return {
+    sales,
+    revenueCents: _sum.totalAmount ? toCents(_sum.totalAmount) : 0,
+  }
 }
 
 // ───────────── Writes ─────────────

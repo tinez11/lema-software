@@ -20,9 +20,11 @@ export type ModuleDefinition = {
 }
 
 export const MODULES: readonly ModuleDefinition[] = [
-  // Milk lives at `/`, not `/milk`: home is still the entry screen both roles
-  // land on, and `app/(app)/milk/` holds only its actions.
-  { value: "MILK", label: "Cows & Milk", href: "/", accent: "moss" },
+  // Each module owns a route of its own. Milk used to sit at `/` because home
+  // *was* the milk screen; `/` is now a role branch (the owner's dashboard, or
+  // a worker's redirect), so the special case is gone and the registry reads
+  // the same for all three.
+  { value: "MILK", label: "Cows & Milk", href: "/milk", accent: "moss" },
   { value: "LAND", label: "Land & Produce", href: "/land", accent: "gold" },
   { value: "SHOP", label: "Shop", href: "/shop", accent: "ochre" },
 ]
@@ -72,5 +74,25 @@ export function modulesFor(
 ): readonly ModuleDefinition[] {
   return MODULES.filter((module) =>
     isModuleAssigned(assignedModules, module.value)
+  )
+}
+
+/**
+ * Where a user should land when they open the app.
+ *
+ * The first module they are assigned, in registry order (MILK, LAND, SHOP) —
+ * not the order the assignment happens to be stored in, so two workers with
+ * the same modules always land the same way.
+ *
+ * `null` when there is nowhere to send them: a module with no route yet, or an
+ * assignment naming nothing reachable. The caller shows an explanation rather
+ * than redirecting into a 404.
+ */
+export function landingHrefFor(
+  assignedModules: readonly Module[]
+): string | null {
+  return (
+    modulesFor(assignedModules).find((module) => module.href !== null)?.href ??
+    null
   )
 }

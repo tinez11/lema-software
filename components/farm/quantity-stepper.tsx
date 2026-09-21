@@ -96,6 +96,16 @@ export function QuantityStepper({
           value={draft ?? value.toFixed(decimals)}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={(event) => commit(event.target.value)}
+          onKeyDown={(event) => {
+            // Enter in a number field means "that is the number", not "save
+            // the entry". The draft above has not reached the parent yet, so
+            // letting it submit the surrounding form would send the previous
+            // value — commit it and stay put instead.
+            if (event.key !== "Enter") return
+
+            event.preventDefault()
+            commit(event.currentTarget.value)
+          }}
           onFocus={(event) => event.target.select()}
           disabled={disabled}
           className={cn(

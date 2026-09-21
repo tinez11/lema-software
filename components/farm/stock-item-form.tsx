@@ -1,12 +1,14 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 
-import { Button } from "@/components/ui/button"
+import { SubmitButton } from "@/components/farm/submit-button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createStockItemAction } from "@/app/(app)/shop/actions"
+import { parseAmountToCents } from "@/lib/money"
 import { MAX_STOCK_NAME_LENGTH } from "@/lib/shop-config"
+import { useSingleFlight } from "@/lib/use-single-flight"
 
 // Owner-only catalogue entry, in the owner treatment — the same arrangement as
 // `field-form.tsx` and `crop-cycle-form.tsx`: hidden from workers, and refused
@@ -16,22 +18,10 @@ import { MAX_STOCK_NAME_LENGTH } from "@/lib/shop-config"
 // explicit restock, which is invariant 3 — the shop's stock is never inferred
 // from anything.
 
-/**
- * Reads a typed amount ("12.50", "12,50", "12") as whole cents.
- *
- * This is the one place a float touches money, and it is immediately rounded
- * to an integer: `12.10 * 100` is 1209.9999999999998 in binary floating point,
- * which is exactly why nothing downstream is allowed to work in units.
- * Returns null for anything that is not an amount, so the caller can say so
- * rather than sending NaN to the server.
- */
-function parsePriceToCents(input: string): number | null {
-  const trimmed = input.trim().replace(",", ".")
-
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null
-
-  return Math.round(Number(trimmed) * 100)
-}
+// The typed-amount reader this form used to own now lives in `lib/money.ts` as
+// `parseAmountToCents`, beside `formatCents`. Land's input-cost form needs the
+// same conversion, and two copies of the code that turns a typed price into
+// cents is two places for money parsing to drift.
 
 /**
  * Owner-only form for adding something to the shop's catalogue. The price is
@@ -44,17 +34,18 @@ export function StockItemForm() {
   const [price, setPrice] = useState("")
   const [feedback, setFeedback] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
-  const [pending, startTransition] = useTransition()
 
   const ready = name.trim() !== "" && unit.trim() !== "" && price.trim() !== ""
 
-  /** Sends the form and turns each typed result into something to read. */
-  function save() {
-    if (!ready || pending) return
+  // Sends the form and turns each typed result into something to read, and
+  // reports whether one is in flight. The readiness check is repeated here
+  // because a disabled button does not stop the Enter key submitting the form.
+  const [submit, pending] = useSingleFlight(async () => {
+    if (!ready) return
 
     setFeedback(null)
 
-    const priceCents = parsePriceToCents(price)
+    const priceCents = parseAmountToCents(price)
 
     if (priceCents === null) {
       setFailed(true)
@@ -62,46 +53,47 @@ export function StockItemForm() {
       return
     }
 
-    startTransition(async () => {
-      try {
-        const result = await createStockItemAction({
-          name,
-          category,
-          unit,
-          priceCents,
-        })
+    try {
+      const result = await createStockItemAction({
+        name,
+        category,
+        unit,
+        priceCents,
+      })
 
-        switch (result.status) {
-          case "ok":
-            setName("")
-            setCategory("")
-            setUnit("")
-            setPrice("")
-            setFailed(false)
-            setFeedback(`${result.name} added, starting at zero stock.`)
-            return
-          case "not-owner":
-            setFailed(true)
-            setFeedback("Only the owner can add stock items.")
-            return
-          case "invalid":
-            setFailed(true)
-            setFeedback(result.message)
-            return
-          case "not-allowed":
-            setFailed(true)
-            setFeedback("You're not signed in. Open the app again.")
-            return
-        }
-      } catch {
-        setFailed(true)
-        setFeedback("No connection — the item wasn't saved.")
+      switch (result.status) {
+        case "ok":
+          setName("")
+          setCategory("")
+          setUnit("")
+          setPrice("")
+          setFailed(false)
+          setFeedback(`${result.name} added, starting at zero stock.`)
+          return
+        case "not-owner":
+          setFailed(true)
+          setFeedback("Only the owner can add stock items.")
+          return
+        case "invalid":
+          setFailed(true)
+          setFeedback(result.message)
+          return
+        case "not-allowed":
+          setFailed(true)
+          setFeedback("You're not signed in. Open the app again.")
+          return
       }
-    })
-  }
+    } catch {
+      setFailed(true)
+      setFeedback("No connection — the item wasn't saved.")
+    }
+  })
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm">
+    <form
+      action={submit}
+      className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm"
+    >
       <h3 className="text-base font-semibold">Add a stock item</h3>
 
       <div className="flex flex-col gap-2">
@@ -166,13 +158,13 @@ export function StockItemForm() {
         </p>
       )}
 
-      <Button
-        onClick={save}
-        disabled={!ready || pending}
+      <SubmitButton
+        disabled={!ready}
+        pendingLabel="Adding the item…"
         className="self-start rounded-lg"
       >
-        {pending ? "Adding…" : "Add item"}
-      </Button>
-    </div>
+        Add item
+      </SubmitButton>
+    </form>
   )
 }
