@@ -342,6 +342,40 @@ back to 0.
 | Extra — a new item starts at zero stock | ✅ stocking the shelf stays a separate explicit act (invariant 3) |
 | Extra — `formatCents` | ✅ 3750 → "37.50", 5 → "0.05" |
 
+- **`07-module-nav-separation.md` — the nav reads as navigation** ✅
+  - **Logged late.** This shipped inside `ffe5c5c` alongside the Shop
+    write path and was never given an entry of its own; it is recorded
+    here at its proper place in the order, checked against the code
+    rather than from memory.
+  - A visual-hierarchy fix, not a feature: on the milk screen the
+    "Logged today" rows and the module-nav rows were the same shape
+    stacked with the same gap, so nothing told a worker that the last
+    two rows left the page entirely.
+  - `components/farm/module-nav.tsx` renders as its own labelled,
+    ruled-off group — `border-t` plus top margin, and an "Other
+    modules" heading deliberately quieter than the `text-lg
+    font-semibold` section heading above it, because it labels a way out
+    of the screen rather than another section of its data.
+  - The separation lives in the component, so every screen that renders
+    it inherits it. No page overrides it: all four call sites pass
+    `assignedModules`, `current` and `treatment` and nothing else.
+  - Rule weight follows the panel-edge logic already in `ui-context.md`
+    — 2px for a worker, 1px for the owner — and is recorded in that
+    file's treatment table.
+
+### Verification of `07-module-nav-separation.md`
+
+| Check | Result |
+| --- | --- |
+| A visible break between "Logged today" and the nav | ✅ `border-t` with `mt-4 pt-8` (worker) / `mt-2 pt-6` (owner), on top of the page's own `gap-8` / `gap-6` |
+| The nav carries a heading identifying it as navigation | ✅ `<h2>Other modules</h2>`, plus `aria-label="Other modules"` on the `<nav>` |
+| The fix lives in `module-nav.tsx` alone | ✅ no call site passes a `className` or any layout prop |
+| Renders correctly for both roles | ✅ both branches of `/milk`, and `/land` and `/shop` |
+| Individual rows unchanged | ✅ icon, label and chevron untouched; only the grouping changed |
+| `npm run build` passes | ✅ exit 0 |
+| `npm run lint` passes | ✅ exit 0 |
+| Since superseded by `08` | The spec named the milk screen as `/`; milk moved to `/milk`, so that is where both roles now see this. The owner's `/` renders no `ModuleNav` at all — the dashboard's metric cards are the cross-module links there |
+
 - **`08-owner-dashboard.md` — the three-module dashboard** ✅ (browser
   walkthrough outstanding — see "In Progress")
   - `app/(app)/page.tsx` is now a role branch and nothing else: the
@@ -383,6 +417,7 @@ back to 0.
 | No `Decimal` in the dashboard's payload | ✅ `getTodaySalesSummaryWithFinancials` returns `revenueCents: number`; `totalAmount` never leaves the helper. Milk liters and harvest quantities are `Float` in the schema, so neither was ever a `Decimal` |
 | The Land card shows a quantity, never a cost | ✅ `getRecentHarvestSummary` selects quantity and unit only, and has no `...WithFinancials` twin to reach for |
 | Shop revenue comes from the privileged helper | ✅ and the safe count-only twin exists unused, as the spec asked |
+| The needs-attention list shows real low-stock items and nothing fabricated | ✅ its only source is `getLowStockItems()`. No milk or land alert was invented; `needs-attention-list.tsx` records why in a comment, so the next person to add one does it with a real source |
 | The owner reaches milk at `/milk`, unchanged in substance | ⏳ builds and type-checks; **not yet seen in a browser** |
 | The grid is multi-column on desktop and single on phone | ⏳ **not yet seen at either width** |
 | A worker assigned only `LAND` or `SHOP` lands there | ⏳ **not yet walked** — needs two Clerk sessions and a direct `assignedModules` edit |
