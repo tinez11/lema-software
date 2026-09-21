@@ -11,6 +11,7 @@ import type {
 import { prisma } from "./client"
 import { farmDate } from "./dates"
 import { toCents } from "./money"
+import { roundQuantity } from "../land-config"
 
 // Thin read helpers for Land & Produce: the field registry, crop cycles, and
 // the input/harvest records attached to a cycle.
@@ -183,6 +184,46 @@ export function sumHarvestQuantity(cropCycleId: string) {
     where: { cropCycleId },
     _sum: { quantity: true },
   })
+}
+
+/**
+ * Recent harvest activity, grouped by the unit each record was logged in.
+ *
+ * Grouped rather than summed because `HarvestRecord.unit` is one of
+ * `HARVEST_UNITS` — kg, bags, crates, bunches — and adding 12 crates to 40 kg
+ * produces a number that means nothing. `sumHarvestQuantity()` groups for the
+ * same reason. Largest total first, so a caller showing one headline figure
+ * shows the unit that dominated the period.
+ *
+ * Quantity only. `InputRecord`, cost and cost-vs-yield are a later unit, so
+ * there is no financial twin of this helper to forget to gate.
+ */
+export async function getRecentHarvestSummary(
+  options: { from?: Date } = {}
+): Promise<{
+  totals: { unit: string; quantity: number }[]
+  entries: number
+}> {
+  const where = options.from ? { date: { gte: options.from } } : undefined
+
+  const [grouped, entries] = await Promise.all([
+    prisma.harvestRecord.groupBy({
+      by: ["unit"],
+      where,
+      _sum: { quantity: true },
+    }),
+    prisma.harvestRecord.count({ where }),
+  ])
+
+  return {
+    totals: grouped
+      .map((row) => ({
+        unit: row.unit,
+        quantity: roundQuantity(row._sum.quantity ?? 0),
+      }))
+      .sort((a, b) => b.quantity - a.quantity),
+    entries,
+  }
 }
 
 /**
