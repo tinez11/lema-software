@@ -121,6 +121,15 @@
   this file loads `dotenv` and hands `DATABASE_URL` to migrate and
   introspect. The runtime client gets the same URL through its driver
   adapter instead.
+- `DATABASE_URL` carries **`sslmode=verify-full`**, spelled out rather
+  than left as `require`. The two are the same thing today — `pg` treats
+  `require` as an alias for `verify-full` — but `pg` v9 and
+  `pg-connection-string` v3 will give `require` its standard libpq
+  meaning, which encrypts without verifying the certificate or the
+  hostname. Leaving it implicit would have turned a dependency bump into
+  a silent downgrade of the database connection. The host
+  (`pooled.db.prisma.io`) presents a publicly trusted certificate, so
+  full verification needs no extra CA configuration.
 
 ## Storage Model
 
