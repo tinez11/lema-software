@@ -422,7 +422,7 @@ back to 0.
 | The grid is multi-column on desktop and single on phone | ◐ the stylesheet carries `.grid-cols-1` and `.md\:grid-cols-3` inside `@media (min-width:48rem)`, so the classes exist at the intended breakpoint. **Not yet seen rendered at either width** |
 | The needs-attention accent edge renders | ✅ resolved without a session. `.border-l-moss` (byte 18729), `.border-l-gold` (18677) and `.border-l-ochre` (18781) all fall **after** `.border-border` (17537) in the emitted stylesheet, so at equal specificity the accent wins `border-left-color`. The arbitrary-property fallback once suggested for this is not needed |
 | The `--sidebar-*` tokens are gone from the shipped CSS | ✅ zero occurrences of "sidebar" in the built stylesheet, not just in the source |
-| A worker assigned only `LAND` or `SHOP` lands there | ⏳ **not yet walked** — needs two Clerk sessions and a direct `assignedModules` edit. The one check with no offline substitute |
+| A worker assigned only `LAND` or `SHOP` lands there | ◐ `landingHrefFor()` exercised directly over every assignment shape: `["LAND"]`→`/land`, `["SHOP"]`→`/shop`, `["MILK"]`→`/milk`, `[]`→`/milk`, `["LAND","SHOP"]`→`/land`, and `["SHOP","LAND"]`→`/land` — storage order does not leak, registry order decides. The **logic** is proven; what is unproven is the **wiring**, that `/` calls it and the redirect fires for a real signed-in worker. Needs two Clerk sessions and a direct `assignedModules` edit |
 
 ## In Progress
 
@@ -471,10 +471,13 @@ browser work, and it is **not yet done**:
    classes land on and nothing above it constrains the width.
 9. A worker assigned only `LAND`, then only `SHOP`, confirmed to land on
    that module from `/` rather than on milk. This is the routing gap the
-   dashboard unit was written to close, and it is the one claim in it
-   that nothing offline can prove — `assignedModules` has to be edited
-   directly in the database for now (open question 19), and it needs two
-   Clerk sessions.
+   dashboard unit was written to close. Half-checked without a session:
+   `landingHrefFor()` was run over every assignment shape and each one
+   resolves correctly, including a list stored out of registry order.
+   What that cannot show is the wiring — that `/` calls it and the
+   redirect actually fires for a signed-in worker. That still needs two
+   Clerk sessions and a direct `assignedModules` edit (open question 19
+   is why there is no UI for the edit).
 
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
