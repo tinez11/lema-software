@@ -2,6 +2,17 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* The context and plan documents are prose *about* the code, not code.
+   Tailwind v4 detects its sources automatically from the project root, so
+   without these it scans the markdown too and turns any class name written
+   inside a sentence into a real utility. That is not merely untidy: a
+   sentence in `progress-tracker.md` containing `--accent-*` as a stand-in
+   for three real tokens generated `border-left-color: var(--accent-*)`,
+   which is not parseable CSS, and the whole stylesheet failed to build.
+   Documentation that mentions a class must never be able to break the app. */
+@source not "../context";
+@source not "../docs";
+
 /*
  * Light-only theme — see context/ui-context.md.
  *
