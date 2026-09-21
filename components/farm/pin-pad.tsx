@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { LockIcon, WifiOffIcon } from "lucide-react"
+import { Loader2Icon, LockIcon, WifiOffIcon } from "lucide-react"
 
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp"
 import { Button } from "@/components/ui/button"
@@ -66,6 +66,10 @@ export function PinPad({
     if (pending || locked) return
 
     setPending(true)
+    // The result of the last try is cleared as this one starts, so "checking"
+    // is never shown beside "wrong PIN, 2 tries left" — and the slots drop
+    // their invalid styling for the duration.
+    setFeedback({ kind: "idle" })
 
     try {
       const result = await action(value)
@@ -160,37 +164,68 @@ export function PinPad({
           </InputOTPGroup>
         </InputOTP>
 
+        {/* Three things can be true while a PIN sits on screen, and they are
+            not the same news: the check is running, the check cannot be made,
+            or the pad is shut. Conflating the first two would make a slow
+            connection look like no connection, so "checking" is deliberately
+            the only one of the three in muted type, with a turning loader
+            rather than a static icon. */}
         <div
           role="status"
           aria-live="polite"
           className={cn(
             "min-h-12 text-base",
-            feedback.kind === "idle" ? "text-muted-foreground" : "text-destructive"
+            pending || feedback.kind === "idle"
+              ? "text-muted-foreground"
+              : "text-destructive"
           )}
         >
-          {feedback.kind === "offline" && (
+          {pending ? (
             <span className="flex items-start gap-2">
-              <WifiOffIcon className="mt-1 h-4 w-4 shrink-0" aria-hidden />
-              <span>
-                No connection. Your PIN is checked on the server, so you&apos;ll
-                need signal to unlock. Entries you already made are safe.
-              </span>
+              <Loader2Icon
+                className="mt-1 h-4 w-4 shrink-0 animate-spin"
+                aria-hidden
+              />
+              <span>Checking your PIN…</span>
             </span>
+          ) : (
+            <>
+              {feedback.kind === "offline" && (
+                <span className="flex items-start gap-2">
+                  <WifiOffIcon className="mt-1 h-4 w-4 shrink-0" aria-hidden />
+                  <span>
+                    No connection. Your PIN is checked on the server, so
+                    you&apos;ll need signal to unlock. Entries you already made
+                    are safe.
+                  </span>
+                </span>
+              )}
+              {feedback.kind === "error" && feedback.message}
+              {locked && `Too many wrong tries. Try again in ${countdown}s.`}
+              {(feedback.kind === "idle" ||
+                (feedback.kind === "locked" && !locked)) &&
+                `${PIN_LENGTH} digits.`}
+            </>
           )}
-          {feedback.kind === "error" && feedback.message}
-          {locked && `Too many wrong tries. Try again in ${countdown}s.`}
-          {(feedback.kind === "idle" ||
-            (feedback.kind === "locked" && !locked)) &&
-            `${PIN_LENGTH} digits.`}
         </div>
 
+        {/* Not `SubmitButton`: this pad is not a `<form>` — `InputOTP`'s own
+            Enter handling is what completes it — so there is no form status to
+            read. The spinner treatment is the same one. */}
         <Button
           type="button"
           onClick={() => submit(pin)}
           disabled={pending || locked || pin.length !== PIN_LENGTH}
-          className="h-14 w-full rounded-xl text-lg font-semibold"
+          aria-busy={pending || undefined}
+          className="relative h-14 w-full rounded-xl text-lg font-semibold"
         >
-          {pending ? "Checking…" : submitLabel}
+          <span className={cn(pending && "invisible")}>{submitLabel}</span>
+          {pending && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <Loader2Icon className="size-5 animate-spin" aria-hidden />
+              <span className="sr-only">Checking your PIN…</span>
+            </span>
+          )}
         </Button>
 
         {forgotHint && (

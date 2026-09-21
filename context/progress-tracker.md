@@ -22,6 +22,12 @@ worker's router, and Cows & Milk moved to `/milk` — so the walkthroughs
 are the only thing left, and the dashboard has added three of its own to
 the list.
 
+`09-loading-states.md` has since put a pending state on all six write
+actions, on the PIN check and on the post-sign-in handoff. It is built,
+but it adds three more walkthroughs rather than removing any: a double
+tap on checkout is the one check on that list a browser is the only
+place to settle.
+
 Cows & Milk went first because `MilkRecord` is the simplest shape and
 its `@@unique([date, session])` constraint is the invariant most worth
 exercising early. Land & Produce followed, deliberately without its
@@ -424,6 +430,67 @@ back to 0.
 | The `--sidebar-*` tokens are gone from the shipped CSS | ✅ zero occurrences of "sidebar" in the built stylesheet, not just in the source |
 | A worker assigned only `LAND` or `SHOP` lands there | ◐ `landingHrefFor()` exercised directly over every assignment shape: `["LAND"]`→`/land`, `["SHOP"]`→`/shop`, `["MILK"]`→`/milk`, `[]`→`/milk`, `["LAND","SHOP"]`→`/land`, and `["SHOP","LAND"]`→`/land` — storage order does not leak, registry order decides. The **logic** is proven; what is unproven is the **wiring**, that `/` calls it and the redirect fires for a real signed-in worker. Needs two Clerk sessions and a direct `assignedModules` edit |
 
+- **`09-loading-states.md` — pending states for the three real waits** ✅
+  (double-tap and post-sign-in checks outstanding — see "In Progress")
+  - `components/farm/submit-button.tsx` — one write-action button for the
+    whole app. It reads `useFormStatus()`, which is React's own
+    action-pending mechanism, so no screen hands it a flag. A wrapper
+    over `components/ui/button.tsx`, never an edit to it: the primitive
+    is generated, and one that reached into form context would stop
+    being a primitive. The hidden label keeps the button's width while
+    the spinner is up, so an owner button sized to its content does not
+    shrink mid-press.
+  - Applied to all six writes: milk `Save entry`, `Save harvest`,
+    `Add field`, `Open cycle`, `Add item`, and the till's
+    `Take payment`. `reset-pin-button.tsx` and
+    `worker-access-button.tsx` were **left alone** — the spec's list did
+    not name them, both already carry a pending label, and both sit
+    behind a confirm step.
+  - `useFormStatus()` only reports inside a `<form action>`, so each of
+    those six now dispatches through one. Five wrap the whole panel,
+    which also gives them keyboard submit; the till wraps only its
+    sticky checkout block, because the cart is React state and wrapping
+    the item grid would put a row of quick-add buttons inside a form.
+  - `lib/use-single-flight.ts` is the half that makes the double tap
+    one submission. Disabling on `pending` is what the worker sees, but
+    `pending` is state: two taps in one frame both read the value from
+    before the first re-render, and Next dispatches the pair one after
+    the other rather than dropping the second ("Sequential dispatch on
+    the client"). The guard has to be synchronous, so it is a ref. On
+    the till that is the difference between one sale and two.
+  - Every form's readiness check moved *into* its handler for the same
+    reason the `<form>` is there: a disabled button does not stop Enter
+    submitting the form around it. `quantity-stepper.tsx` now swallows
+    Enter and commits its draft instead, because the typed digits have
+    not reached the parent yet and submitting would have sent the
+    previous value.
+  - `pin-pad.tsx` gained "checking" as a third state beside offline and
+    lockout — muted type and a turning loader against their destructive
+    type and static icons, and the last try's message is cleared as the
+    next one starts so the two are never on screen together.
+  - `components/farm/sign-in-handoff.tsx` covers the post-sign-in gap.
+    Clerk's `<SignIn />` stays mounted underneath because it is what
+    performs the navigation; the wait is drawn over it. It uses
+    `useAuth()` and not `<Show when="signed-in">`, because in the App
+    Router `Show` resolves server-side and cannot see a session created
+    in this browser a moment ago.
+  - **No `loading.tsx` was added anywhere**, per the spec. The
+    treatment is recorded in `ui-context.md`, "Pending States".
+
+### Verification of `09-loading-states.md`
+
+| Check from the spec | Result |
+| --- | --- |
+| `npm run build` passes | ✅ 11 routes, unchanged set. `/sign-in/[[...sign-in]]` was already `ƒ` before this unit — checked by building the old page — so nothing went from static to dynamic |
+| `npm run lint` passes | ✅ exit 0 |
+| `npx tsc --noEmit` passes | ✅ exit 0 |
+| The spinner actually spins | ✅ resolved in the emitted stylesheet rather than assumed: `.animate-spin`, `@keyframes spin` and `--animate-spin: spin 1s linear infinite` are all present, along with `.invisible`, `.sr-only`, `.relative`, `.inset-0` and `.size-5`. Worth checking because `@theme inline` in `globals.css` could have dropped the animation token, and a spinner that does not turn is not a pending state |
+| No spinner on a route without one of the three waits | ✅ every change is inside a write form, the PIN pad, or the sign-in page. No `loading.tsx` exists in the tree |
+| `components/ui/*` untouched | ✅ `git diff` touches nothing under `components/ui/` |
+| A double tap on a write action submits once | ◐ **not walked in a browser** — that needs a Clerk session, like the rest of "In Progress". What is settled is the mechanism: the guard is a `useRef` checked and set synchronously before the first `await` and released in a `finally`, so a second call in the same frame returns without dispatching. What is unproven is that two real taps arrive as two React events against that same closure |
+| The PIN pad's checking state is distinct from offline and lockout | ◐ distinct in the source by colour (muted vs. `--destructive`), by icon (turning loader vs. static `WifiOff`), and by the message itself; the slots are also disabled, which offline does not do. **Not yet seen on screen** |
+| The post-sign-in gap no longer flashes blank | ◐ the mechanism is confirmed from the SDK rather than guessed: `@clerk/nextjs` 7.9.2 wires `routerPush`/`routerReplace` to Next's router, so the hop to `/` is a soft navigation and this page stays mounted through it — which is what makes an overlay here able to cover the gap at all. **Not yet seen signed in**, and it is the one check of the three that cannot be inferred any further without a session |
+
 ## In Progress
 
 Both `04-milk-entry.md` and `05-land-produce.md` are built and verified
@@ -478,6 +545,20 @@ browser work, and it is **not yet done**:
    redirect actually fires for a signed-in worker. That still needs two
    Clerk sessions and a direct `assignedModules` edit (open question 19
    is why there is no UI for the edit).
+
+**Pending states**
+
+10. A write action double-tapped fast — "Save entry" and, more to the
+    point, "Take payment" — and confirmed to produce exactly **one**
+    record, by attempting it rather than by trusting the disabled
+    button. The guard is a synchronous ref, so the logic holds on
+    inspection; what the browser adds is that two real taps do arrive
+    as two React events against it.
+11. The PIN pad's "checking" state seen next to its offline and lockout
+    states, to confirm the three read as three.
+12. The post-sign-in handoff walked on a real sign-in, for both an owner
+    (who lands on `/`) and a worker (who is sent on to `/lock` or
+    `/set-pin`, so the wait covers two hops rather than one).
 
 Worth watching on the first walkthrough of either: every form and list
 on both screens is server-rendered, and the actions call `refresh()` to
@@ -1063,6 +1144,18 @@ test can reach.
   `-b <base>` and `-p <preset>` to run unattended.
 - `next dev` rewrites the `nextjs-agent-rules` block in `AGENTS.md`;
   committing that change alongside real work keeps the tree clean.
+- An icon inside a `Button` must size itself with `size-*`, not
+  `h-5 w-5`. The primitive carries
+  `[&_svg:not([class*='size-'])]:size-4`, and that descendant selector
+  out-specifies a plain `.h-5`, so `h-5 w-5` silently renders at 16px.
+  Naming the class `size-5` both sets the size and opts out of the
+  rule. `sale-terminal.tsx`'s trash icon predates this note and is
+  still on `h-5 w-5`, so it is drawn at 16px.
+- `SignedIn`, `SignedOut` and `Protect` were **removed** in Clerk Core 3
+  (`@clerk/nextjs@7`) and now throw when rendered. `<Show when=…>`
+  replaces them — but in the App Router `Show` is a server component
+  that awaits `auth()`, so it cannot react to a session created in the
+  browser. Client-side auth state is `useAuth()`.
 - `--font-sans` is declared in an **unlayered** `:root` block in
   `app/globals.css`, which is what makes it win over the
   self-referential `--font-sans: var(--font-sans)` Tailwind emits into

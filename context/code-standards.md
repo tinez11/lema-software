@@ -30,6 +30,21 @@
   catch-all `update` endpoint.
 - All Prisma access happens in server components, route handlers, or
   server actions — never in client-side code.
+- Dispatch a write through `<form action={submit}>`, even where the
+  values travel as React state rather than as `FormData`. React's action
+  mechanism is what `useFormStatus()` reads, and that is how
+  `components/farm/submit-button.tsx` knows it is pending without being
+  handed a flag by every screen that uses it.
+- Wrap that handler in `useSingleFlight` (`lib/use-single-flight.ts`).
+  Disabling the button is what the user sees; the synchronous ref inside
+  the hook is what makes a double tap **one** submission. `pending` is
+  state, so two taps in one frame both read the value from before the
+  first re-render, and Next then dispatches queued actions one after
+  another rather than dropping the second — which on the till is a
+  second sale.
+- Repeat a form's readiness check inside its submit handler rather than
+  leaving it to the button. A disabled submit button does not stop the
+  Enter key submitting the form around it.
 
 ## Styling
 

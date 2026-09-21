@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { AlertTriangleIcon, CheckCircle2Icon, WifiOffIcon } from "lucide-react"
 
 import { ChoiceGrid } from "@/components/farm/choice-grid"
 import { QuantityStepper } from "@/components/farm/quantity-stepper"
-import { Button } from "@/components/ui/button"
+import { SubmitButton } from "@/components/farm/submit-button"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -24,6 +24,7 @@ import {
   MIN_HARVEST_QUANTITY,
 } from "@/lib/land-config"
 import type { HarvestUnit } from "@/lib/land-config"
+import { useSingleFlight } from "@/lib/use-single-flight"
 import { cn } from "@/lib/utils"
 
 // The daily job in Land & Produce, and the one thing both roles do here.
@@ -72,60 +73,62 @@ export function HarvestEntryForm({
   const [quantity, setQuantity] = useState(0)
   const [unit, setUnit] = useState<HarvestUnit>(DEFAULT_HARVEST_UNIT)
   const [feedback, setFeedback] = useState<Feedback>({ kind: "idle" })
-  const [pending, startTransition] = useTransition()
 
   const ready = cropCycleId !== "" && quantity >= MIN_HARVEST_QUANTITY
 
-  /** Sends the entry and turns each typed result into something to read. */
-  function save() {
-    if (!ready || pending) return
+  // Same shape as `milk-entry-form.tsx`: the entry, and whether one is in
+  // flight. The readiness check is repeated here because a disabled button
+  // does not stop the Enter key submitting the form around it.
+  const [submit, pending] = useSingleFlight(async () => {
+    if (!ready) return
 
     setFeedback({ kind: "idle" })
 
-    startTransition(async () => {
-      try {
-        const result = await logHarvestAction({ cropCycleId, quantity, unit })
+    try {
+      const result = await logHarvestAction({ cropCycleId, quantity, unit })
 
-        switch (result.status) {
-          case "ok":
-            setQuantity(0)
-            setFeedback({
-              kind: "saved",
-              message: `Harvest logged — ${result.quantity} ${result.unit}.`,
-            })
-            return
-          case "unknown-cycle":
-            setFeedback({
-              kind: "blocked",
-              message:
-                "That crop cycle no longer exists. Reload and pick it again.",
-            })
-            return
-          case "invalid":
-            setFeedback({ kind: "blocked", message: result.message })
-            return
-          case "not-assigned":
-            setFeedback({
-              kind: "blocked",
-              message:
-                "You're not assigned to Land & Produce. Ask the owner if that's wrong.",
-            })
-            return
-          case "not-allowed":
-            setFeedback({
-              kind: "blocked",
-              message: "You're not signed in to log a harvest. Open the app again.",
-            })
-            return
-        }
-      } catch {
-        setFeedback({ kind: "offline" })
+      switch (result.status) {
+        case "ok":
+          setQuantity(0)
+          setFeedback({
+            kind: "saved",
+            message: `Harvest logged — ${result.quantity} ${result.unit}.`,
+          })
+          return
+        case "unknown-cycle":
+          setFeedback({
+            kind: "blocked",
+            message:
+              "That crop cycle no longer exists. Reload and pick it again.",
+          })
+          return
+        case "invalid":
+          setFeedback({ kind: "blocked", message: result.message })
+          return
+        case "not-assigned":
+          setFeedback({
+            kind: "blocked",
+            message:
+              "You're not assigned to Land & Produce. Ask the owner if that's wrong.",
+          })
+          return
+        case "not-allowed":
+          setFeedback({
+            kind: "blocked",
+            message: "You're not signed in to log a harvest. Open the app again.",
+          })
+          return
       }
-    })
-  }
+    } catch {
+      setFeedback({ kind: "offline" })
+    }
+  })
 
   return (
-    <section
+    // A real `<form>` for the same reason as the milk entry form: React's
+    // action mechanism is what `SubmitButton` reads its pending state from.
+    <form
+      action={submit}
       className={cn(
         "flex flex-col rounded-2xl bg-card",
         worker
@@ -240,16 +243,16 @@ export function HarvestEntryForm({
             <FeedbackNote feedback={feedback} worker={worker} />
           )}
 
-          <Button
-            onClick={save}
-            disabled={!ready || pending}
+          <SubmitButton
+            disabled={!ready}
+            pendingLabel="Saving the harvest…"
             className={cn(
               "h-14 rounded-xl text-lg font-semibold",
               worker ? "w-full" : "self-start px-8"
             )}
           >
-            {pending ? "Saving…" : "Save harvest"}
-          </Button>
+            Save harvest
+          </SubmitButton>
 
           {!ready && (
             <p className="-mt-4 text-sm text-muted-foreground">
@@ -258,7 +261,7 @@ export function HarvestEntryForm({
           )}
         </>
       )}
-    </section>
+    </form>
   )
 }
 

@@ -174,6 +174,44 @@ is also full width; on owner screens it sizes to its content.
 Sibling controls that must match that height — a PIN field, a quantity
 stepper — use `h-14` too, so a worker's row of targets is one size.
 
+## Pending States
+
+Three moments in this app make someone wait, and each has exactly one
+treatment. There is no fourth: a screen that holds none of the three gets no
+skeleton and no spinner.
+
+**A write in flight.** The button that started it keeps its size and swaps its
+label for a turning loader at `size-5`, while the form's own controls —
+steppers, choice grids, selects — disable for the duration.
+`components/farm/submit-button.tsx` is the one button that does this, and it
+does it on every write: save entry, save harvest, add field, open cycle, add
+item, take payment. The label stays in the layout while it is hidden, so a
+button sized to its content does not shrink out from under the thumb pressing
+it. Worker buttons keep their `h-14` full width and owner buttons keep whatever
+size they already had on each screen — the pending state does not change the
+owner/worker split, it inherits it.
+
+**A PIN being checked.** `pin-pad.tsx` says "Checking your PIN…" in **muted**
+type with a turning loader, in the same region that carries its offline and
+lockout messages — both of which are `--destructive` with a static icon. The
+three are told apart by colour and by motion on purpose. Offline means "the
+check cannot be made", lockout means "the pad is shut", and checking means "the
+check is running right now"; a slow connection must not be readable as no
+connection, because the worker's response to those two is not the same.
+
+**The gap after signing in.** Clerk finishing a sign-in and this app knowing
+what the person may see are two different moments, with a router-cache
+invalidation, `resolveAuthGate()` and possibly a further hop to `/set-pin` or
+`/lock` in between. `components/farm/sign-in-handoff.tsx` covers that one gap
+with a branded full-screen wait — the app's name, a loader, "Opening your
+screen…" — instead of leaving Clerk's card to empty out. It is scoped to that
+handoff and nothing else.
+
+**No route-level `loading.tsx`, anywhere.** A skeleton per route would be a
+guess about which routes are slow. A page that turns out to be genuinely slow
+in use is a separately justified fix for that page, not a reason to put a
+placeholder in front of every route first.
+
 ## Entry Controls
 
 The two controls a data-entry screen is built from. Both are `h-14`
